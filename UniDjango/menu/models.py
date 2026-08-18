@@ -52,6 +52,33 @@ class SysMenuSerializer(serializers.ModelSerializer):
         model = SysMenu
         fields = ('id', 'name', 'icon', 'parent_id', 'order_num', 'path', 'component', 'menu_type', 'perms', 'remark')
 
+    def _get_descendant_ids(self, root_id):
+        """返回指定菜单的全部后代 ID，用于防止把父级指向自己的子树。"""
+        descendant_ids = set()
+        pending = [root_id]
+        while pending:
+            child_ids = list(
+                SysMenu.objects.filter(parent_id__in=pending).values_list('id', flat=True)
+            )
+            descendant_ids.update(child_ids)
+            pending = child_ids
+        return descendant_ids
+
+    def validate(self, attrs):
+        parent = attrs.get('parent')
+        instance = getattr(self, 'instance', None)
+
+        if parent is None or instance is None or not getattr(instance, 'pk', None):
+            return attrs
+
+        if parent.pk == instance.pk:
+            raise serializers.ValidationError({'parent_id': '不能选择自身作为父级'})
+
+        if parent.pk in self._get_descendant_ids(instance.pk):
+            raise serializers.ValidationError({'parent_id': '不能选择自己的子级作为父级'})
+
+        return attrs
+
 
 class SysRoleMenu(models.Model):
     """

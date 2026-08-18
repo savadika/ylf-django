@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 from jwt import ExpiredSignatureError,InvalidTokenError,PyJWTError
@@ -21,7 +22,9 @@ class JwtAuthenticationMiddleware(MiddlewareMixin):
         public_exact = {
             '/user/gen_token',
         }
-        public_prefixes = ('/media', '/static', '/swagger', '/redoc', '/favicon.ico')
+        public_prefixes = ['/media', '/static', '/favicon.ico']
+        if getattr(settings, 'SWAGGER_ENABLED', False):
+            public_prefixes.extend(['/swagger', '/redoc'])
 
         # 放行静态资源、Swagger 文档和白名单接口
         if path_normalized in public_exact or any(path.startswith(prefix) for prefix in public_prefixes):

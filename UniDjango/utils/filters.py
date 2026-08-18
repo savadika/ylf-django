@@ -303,14 +303,16 @@ def create_complex_filter_class(model, search_fields=None, extra_filters=None, a
         field = model_fields.get(time_field_name)
         if isinstance(field, (models.DateField, models.DateTimeField)):
             filter_cls = django_filters.DateTimeFilter if isinstance(field, models.DateTimeField) else django_filters.DateFilter
+            start_lookup = 'date__gte' if isinstance(field, models.DateTimeField) else 'gte'
+            end_lookup = 'date__lte' if isinstance(field, models.DateTimeField) else 'lte'
             attrs[f'{time_field_name}_start'] = filter_cls(
                 field_name=time_field_name,
-                lookup_expr='gte',
+                lookup_expr=start_lookup,
                 label=f'{getattr(field, "verbose_name", time_field_name)}开始',
             )
             attrs[f'{time_field_name}_end'] = filter_cls(
                 field_name=time_field_name,
-                lookup_expr='lte',
+                lookup_expr=end_lookup,
                 label=f'{getattr(field, "verbose_name", time_field_name)}结束',
             )
             base_fields.extend([f'{time_field_name}_start', f'{time_field_name}_end'])
@@ -342,14 +344,16 @@ def create_complex_filter_class(model, search_fields=None, extra_filters=None, a
                 base_fields.append(field_name)
             elif isinstance(field, (models.DateField, models.DateTimeField)):
                 filter_cls = django_filters.DateTimeFilter if isinstance(field, models.DateTimeField) else django_filters.DateFilter
+                start_lookup = 'date__gte' if isinstance(field, models.DateTimeField) else 'gte'
+                end_lookup = 'date__lte' if isinstance(field, models.DateTimeField) else 'lte'
                 attrs[f'{field_name}_start'] = filter_cls(
                     field_name=field_name,
-                    lookup_expr='gte',
+                    lookup_expr=start_lookup,
                     label=f'{getattr(field, "verbose_name", field_name)}开始',
                 )
                 attrs[f'{field_name}_end'] = filter_cls(
                     field_name=field_name,
-                    lookup_expr='lte',
+                    lookup_expr=end_lookup,
                     label=f'{getattr(field, "verbose_name", field_name)}结束',
                 )
                 base_fields.extend([f'{field_name}_start', f'{field_name}_end'])

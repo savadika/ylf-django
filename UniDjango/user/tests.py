@@ -1,10 +1,12 @@
 """user 模块测试：JWT、密码强度、登录锁定、中间件、过滤器。"""
 import json
+from datetime import datetime
 from unittest import mock
 
 from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 from rest_framework.serializers import ValidationError
 from rest_framework.test import APIClient
 
@@ -115,3 +117,37 @@ class SysUserFilterTests(SimpleTestCase):
         filter_cls = create_complex_filter_class(SysUser, search_fields=['username'])
         self.assertNotIn('password', filter_cls.base_filters)
         self.assertIn('username', filter_cls.base_filters)
+
+
+class SysUserDateTimeFilterTests(TestCase):
+    def test_datetime_end_filter_includes_whole_day(self):
+        user1 = SysUser.objects.create(
+            username='eod-user-1',
+            password='x',
+            email='eod-user-1@example.com',
+            status=1,
+        )
+        user2 = SysUser.objects.create(
+            username='eod-user-2',
+            password='x',
+            email='eod-user-2@example.com',
+            status=1,
+        )
+
+        SysUser.objects.filter(pk=user1.pk).update(
+            create_time=timezone.make_aware(datetime(2026, 8, 18, 23, 30))
+        )
+        SysUser.objects.filter(pk=user2.pk).update(
+            create_time=timezone.make_aware(datetime(2026, 8, 19, 0, 30))
+        )
+
+        filter_cls = create_complex_filter_class(SysUser, search_fields=['username'])
+        filtered = filter_cls(
+            {'create_time_start': '2026-08-18', 'create_time_end': '2026-08-18'},
+            queryset=SysUser.objects.all(),
+        ).qs
+
+        self.assertEqual(
+            set(filtered.values_list('username', flat=True)),
+            {'eod-user-1'},
+        )

@@ -44,6 +44,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 从环境变量读取，如果没有则使用默认值（仅用于开发）
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
+# Swagger / ReDoc 仅在调试模式开启；生产环境不暴露接口文档。
+SWAGGER_ENABLED = DEBUG
+
 # 生产环境必须提供独立密钥，开发环境才允许回退到不安全密钥。
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
 if not SECRET_KEY:

@@ -44,14 +44,18 @@ urlpatterns = [
     re_path(r'^log(?:/|$)', include('log.urls')), # 日志模块
     path('upload/', UploadFileView.as_view(), name='upload_file'), # 通用上传接口
 
-     # Swagger 文档路由
-     #  Swagger UI : http://127.0.0.1:8000/swagger/
-     #  ReDoc : http://127.0.0.1:8000/redoc/  更加可视化阅读
-    re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
-    re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    re_path(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
  ]
 
- # 开发环境下提供 /media/ 路由以访问 MEDIA_ROOT 内的文件
+# Swagger / ReDoc 文档仅在调试模式开启，生产环境不注册路由。
+if getattr(settings, 'SWAGGER_ENABLED', False):
+    urlpatterns += [
+        #  Swagger UI : http://127.0.0.1:8000/swagger/
+        #  ReDoc : http://127.0.0.1:8000/redoc/  更加可视化阅读
+        re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+        re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+        re_path(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    ]
+
+# 开发环境下提供 /media/ 路由以访问 MEDIA_ROOT 内的文件
 if settings.DEBUG:
      urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
