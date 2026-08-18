@@ -1,0 +1,107 @@
+
+services:
+  # Redis 缓存服务 (开发环境)
+  redis:
+    image: redis:7-alpine
+    container_name: ${REDIS_CONTAINER_NAME}
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - ./redis_data:/data
+    networks:
+      - ylf-network
+    ports:
+      - "${REDIS_PORT}:${REDIS_INTERNAL_PORT}"
+
+  backend:
+    build:
+      context: ./UniDjango
+    image: ${BACKEND_CONTAINER_NAME}:latest
+    entrypoint: ["/wait-for-mysql.sh", "sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:${BACKEND_INTERNAL_PORT}"]
+    volumes:
+      - ./UniDjango:/app
+    environment:
+      # 调试模式
+      - DEBUG=True
+      # 数据库配置
+      - DB_HOST=${MYSQL_CONTAINER_NAME}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_INTERNAL_PORT=${MYSQL_INTERNAL_PORT}
+      # Django 配置
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+      - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - DJANGO_TIME_ZONE=${DJANGO_TIME_ZONE:-Asia/Shanghai}
+      - DJANGO_LANGUAGE_CODE=${DJANGO_LANGUAGE_CODE:-zh-hans}
+      - CORS_ORIGIN_ALLOW_ALL=True
+      # JWT 独立签名密钥（不要与 DJANGO_SECRET_KEY 复用）
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      # 开发环境前端直连后端，无反向代理
+      - TRUSTED_PROXY_COUNT=0
+      # Redis 配置
+      - REDIS_HOST=${REDIS_CONTAINER_NAME}
+      - REDIS_PORT=${REDIS_INTERNAL_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    container_name: ${BACKEND_CONTAINER_NAME}
+    ports:
+      - "${BACKEND_PORT}:${BACKEND_INTERNAL_PORT}"
+    depends_on:
+      - db
+      - redis
+    networks:
+      - ylf-network
+
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile-mysql
+    image: ${MYSQL_CONTAINER_NAME}:latest
+    container_name: ${MYSQL_CONTAINER_NAME}
+    volumes:
+      - ./db_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "${MYSQL_PORT}:${MYSQL_INTERNAL_PORT}"
+    networks:
+      - ylf-network
+
+  frontend:
+    # 开发模式：使用专门的 Node 开发镜像
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: ${FRONTEND_CONTAINER_NAME}:dev
+    container_name: ${FRONTEND_CONTAINER_NAME}
+    working_dir: /app
+    volumes:
+      - ./frontend:/app  # <--- 挂载源码，实现热重载
+      - /app/node_modules # <--- 隔离 node_modules，避免宿主机与容器环境冲突
+    # 启动命令：安装依赖并启动开发服务器
+    # 注意：第一次启动可能会慢，因为要 install
+    command: bash -c "npm config set registry https://registry.npmmirror.com && npm install && npm run dev"
+    stdin_open: true # 相当于 -i
+    tty: true        # 相当于 -t
+    ports:
+      - "${FRONTEND_DEV_PORT}:${FRONTEND_DEV_INTERNAL_PORT}"  # 开发服务器端口
+    environment:
+      - NODE_ENV=development
+      # 传递端口给 Vue CLI
+      - port=${FRONTEND_DEV_INTERNAL_PORT}
+      # 传递外部端口给 Vue CLI 用于显示
+      - EXTERNAL_PORT=${FRONTEND_DEV_PORT}
+      # 传递外部主机地址给 Vue CLI 用于 sockjs 连接
+      # 设置为服务器的实际 IP 地址，或者 0.0.0.0 让客户端使用 window.location.hostname
+      - EXTERNAL_HOST=${EXTERNAL_HOST:-0.0.0.0}
+      # 传递后端端口给 Vue 代码使用
+      - VUE_APP_BACKEND_PORT=${BACKEND_PORT}
+      # 传递服务器地址配置给前端 (统一从 .env 读取)
+      - VUE_APP_SERVER_HOST=${SERVER_HOST}
+      - VUE_APP_SERVER_PROTOCOL=${SERVER_PROTOCOL:-http}
+    networks:
+      - ylf-network
+
+networks:
+  ylf-network:
+    driver: bridge

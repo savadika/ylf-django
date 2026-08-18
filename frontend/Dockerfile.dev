@@ -1,0 +1,8 @@
+FROM node:22
+
+WORKDIR /app
+
+# Vue CLI 4 使用 webpack 4，需要旧版 OpenSSL 提供 MD4 哈希
+ENV NODE_OPTIONS=--openssl-legacy-provider
+
+# 只是一个基础的 Node 环境，实际代码通过 Volume 挂载
