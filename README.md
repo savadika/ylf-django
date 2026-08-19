@@ -38,7 +38,7 @@
 
 ## 快速开始
 
-### 1. 先启动开发环境
+### 1. 开发先启动开发环境
 
 ```bash
 ./scripts/bootstrap.sh dev --password 'CommonPass123'
