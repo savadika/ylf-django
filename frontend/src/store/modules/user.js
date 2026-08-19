@@ -47,7 +47,6 @@ const actions = {
     return new Promise((resolve, reject) => {
       login({ username: username.trim(), password: password }).then(response => {
         //此处修改为自己的登录逻辑
-        console.log('Login success, token:', response.token)
         commit('SET_TOKEN', response.token)
         setToken(response.token)
         resolve()

@@ -20,6 +20,10 @@
 │       ├── layout/           # 后台布局
 │       ├── router/           # 基础路由与动态路由
 │       └── store/            # Vuex（用户、权限、设置）
+├── docker/
+│   └── mysql/                # MySQL 镜像构建文件
+├── docs/                     # 使用文档
+├── scripts/                  # 开发/生产环境启动脚本
 ├── docker-compose.yml        # 生产环境编排
 ├── docker-compose-dev.yml    # 开发环境编排
 └── .env.example              # 环境变量模板
@@ -35,12 +39,26 @@
 ## 快速开始
 
 ```bash
-cp .env.example .env
-# 按需修改 .env 中的端口、数据库密码、SECRET_KEY、JWT_SECRET_KEY
-docker compose up -d
-docker compose exec backend python manage.py init_admin --password '你的强密码'
+./scripts/bootstrap.sh prod
 ```
 
-访问前端：`http://127.0.0.1:9530`（默认 admin 账号）
+脚本会自动准备 `.env`、生成缺失的 Django/JWT 密钥、构建并启动生产环境、初始化 `admin` 账号。MySQL、Redis 和 `admin` 使用同一个密码，可交互输入，也可以直接指定：
 
-更完整的启动、初始化和权限配置说明请查看 [OPERATION.md](OPERATION.md) 和 [STARTUP.md](STARTUP.md)。
+```bash
+./scripts/bootstrap.sh prod --password 'MyStrongPass123'
+```
+
+开发环境可用：
+
+```bash
+./scripts/bootstrap.sh dev
+```
+
+也支持手动启动：
+
+```bash
+make dev
+make prod
+```
+
+更完整的启动、初始化和权限配置说明请查看 [docs/OPERATION.md](docs/OPERATION.md)。

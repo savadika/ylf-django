@@ -10,8 +10,8 @@ class SysLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = SysLog
         fields = (
-            'id', 'username', 'user', 'ip', 'method', 'path', 'status',
-            'cost_time', 'create_time', 'log_type', 'error_msg',
+            'id', 'username', 'user', 'ip', 'method', 'path', 'params', 'status',
+            'cost_time', 'create_time', 'log_type', 'error_msg', 'traceback',
         )
 
 class SysLogViewSet(viewsets.ReadOnlyModelViewSet):

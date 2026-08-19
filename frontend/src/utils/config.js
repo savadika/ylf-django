@@ -43,9 +43,15 @@ export const getBaseImgUrl = () => {
   if (process.env.VUE_APP_BASE_IMG_URL && !process.env.VUE_APP_BASE_IMG_URL.includes('undefined')) {
     return process.env.VUE_APP_BASE_IMG_URL
   }
-  
-  // 否则根据 API 地址生成
+
+  // 生产环境 API 地址是 /prod-api，但媒体文件由 Nginx 在 /media/ 直接托管，
+  // 不能继续用 `${baseApi}/media/`，否则会变成 /prod-api/media/ 并请求到 Django。
   const baseApi = getBaseApiUrl()
+  if (baseApi && baseApi.startsWith('/')) {
+    return `${window.location.origin}/media/`
+  }
+
+  // 开发环境或显式配置了完整 API 地址时，媒体仍挂在 API 服务的 /media/ 下。
   return `${baseApi}/media/`
 }
 

@@ -17,7 +17,7 @@ services:
   db:
     build:
       context: .
-      dockerfile: Dockerfile-mysql
+      dockerfile: docker/mysql/Dockerfile
     image: ${MYSQL_CONTAINER_NAME}:latest # <--- 显式指定镜像名
     container_name: ${MYSQL_CONTAINER_NAME}
     volumes:
@@ -55,6 +55,12 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       # 前面有一层 Nginx 反向代理，用于正确解析客户端真实 IP
       TRUSTED_PROXY_COUNT: "1"
+      # HTTPS 部署时在 .env 中打开，HTTP 部署保持默认关闭
+      DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-False}
+      DJANGO_SECURE_HSTS_SECONDS: ${DJANGO_SECURE_HSTS_SECONDS:-31536000}
+      DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS: ${DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS:-True}
+      DJANGO_SECURE_HSTS_PRELOAD: ${DJANGO_SECURE_HSTS_PRELOAD:-True}
+      DJANGO_CSRF_COOKIE_SECURE: ${DJANGO_CSRF_COOKIE_SECURE:-True}
       # Redis 配置
       REDIS_HOST: ${REDIS_CONTAINER_NAME}
       REDIS_PORT: ${REDIS_INTERNAL_PORT}

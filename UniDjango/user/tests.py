@@ -7,9 +7,13 @@ from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
+from django.core.management import call_command
 from rest_framework.serializers import ValidationError
 from rest_framework.test import APIClient
+from io import StringIO
 
+from menu.models import SysMenu, SysRoleMenu
+from role.models import SysRole
 from user.jwt_auth import decode_token, encode_token, is_token_revoked, revoke_token
 from user.models import SysUser
 from user.views import LOGIN_MAX_FAILURES, SysUserSerializer
@@ -104,6 +108,16 @@ class LoginLockoutTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn('token', resp.json())
 
+    def test_disabled_user_uses_generic_login_error(self):
+        SysUser.objects.filter(username='locktest').update(status=0)
+        url = '/user/gen_token'
+        body = json.dumps({'username': 'locktest', 'password': 'right-password'})
+
+        resp = self.client.post(url, data=body, content_type='application/json')
+
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()['message'], '用户不存在或密码错误')
+
 
 class JwtMiddlewareTests(TestCase):
     @mock.patch('log.middleware.submit_log')
@@ -151,3 +165,19 @@ class SysUserDateTimeFilterTests(TestCase):
             set(filtered.values_list('username', flat=True)),
             {'eod-user-1'},
         )
+
+
+class InitAdminSeedTests(TestCase):
+    def test_init_admin_seeds_default_menu_tree(self):
+        call_command(
+            'init_admin',
+            username='seed_admin',
+            password='StrongPass123',
+            email='seed_admin@example.com',
+            stdout=StringIO(),
+        )
+
+        self.assertTrue(SysMenu.objects.filter(name='用户管理', menu_type='C').exists())
+        self.assertTrue(SysMenu.objects.filter(name='用户列表', perms='system:user:list').exists())
+        role = SysRole.objects.get(code='admin')
+        self.assertTrue(SysRoleMenu.objects.filter(role=role, menu__name='用户管理').exists())

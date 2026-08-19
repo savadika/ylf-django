@@ -2,23 +2,29 @@
 # UniDjango 一键验证 / 常用命令
 #
 # 默认针对开发编排（docker-compose-dev.yml）操作后端容器。
-# 换用生产编排：make COMPOSE_FILE=docker-compose.yml <目标>
+# 明确启动环境：make dev / make prod
 # 指定测试范围：make test TEST=user   （等价 python manage.py test user）
 # ======================================================================
 
 COMPOSE_FILE ?= docker-compose-dev.yml
 COMPOSE      := docker compose -f $(COMPOSE_FILE)
+DEV_COMPOSE  := docker compose -f docker-compose-dev.yml
+PROD_COMPOSE := docker compose -f docker-compose.yml
 BACKEND      := backend
 PY           := $(COMPOSE) exec -T $(BACKEND) python manage.py
 
-.PHONY: help up down logs check check-deploy migrate makemigrations test verify shell wait-db
+.PHONY: help dev prod dev-up prod-up dev-down prod-down dev-logs prod-logs up down logs check check-deploy migrate makemigrations test verify shell wait-db
 
 .DEFAULT_GOAL := help
 
 help:
 	@echo "UniDjango 常用命令（默认开发编排）："
-	@echo "  make up           启动服务"
-	@echo "  make down         停止服务"
+	@echo "  make dev          启动开发环境"
+	@echo "  make prod         构建并启动生产环境"
+	@echo "  make dev-down     停止开发环境"
+	@echo "  make prod-down    停止生产环境"
+	@echo "  make up           启动服务（默认开发环境）"
+	@echo "  make down         停止服务（默认开发环境）"
 	@echo "  make logs         查看后端日志"
 	@echo "  make check        运行 Django 系统检查"
 	@echo "  make check-deploy 运行部署安全检查 (check --deploy)"
@@ -28,14 +34,36 @@ help:
 	@echo "  make verify       一键验证：check → migrate → test"
 	@echo "  make shell        进入 Django shell"
 
+dev: dev-up
+
+prod: prod-up
+
+dev-up:
+	$(DEV_COMPOSE) up -d
+
+prod-up:
+	$(PROD_COMPOSE) up -d --build
+
+dev-down:
+	$(DEV_COMPOSE) down
+
+prod-down:
+	$(PROD_COMPOSE) down
+
+dev-logs:
+	$(DEV_COMPOSE) logs -f $(BACKEND)
+
+prod-logs:
+	$(PROD_COMPOSE) logs -f $(BACKEND)
+
 up:
-	$(COMPOSE) up -d
+	$(DEV_COMPOSE) up -d
 
 down:
-	$(COMPOSE) down
+	$(DEV_COMPOSE) down
 
 logs:
-	$(COMPOSE) logs -f $(BACKEND)
+	$(DEV_COMPOSE) logs -f $(BACKEND)
 
 check:
 	$(PY) check

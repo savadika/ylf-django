@@ -74,6 +74,20 @@ if not JWT_SECRET_KEY:
 # 可信反向代理层数：用于正确解析客户端真实 IP（生产 Nginx 前为 1 层）。
 TRUSTED_PROXY_COUNT = int(os.environ.get('TRUSTED_PROXY_COUNT', '0') or 0)
 
+# ==========================================
+# HTTPS / HSTS 安全配置
+# ==========================================
+# 默认关闭，兼容当前 HTTP 部署；走 HTTPS 发布时在 .env 中将对应项打开。
+SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SECURE_SSL_REDIRECT', 'False').lower() in ('true', '1', 'yes')
+SECURE_HSTS_SECONDS = int(os.environ.get('DJANGO_SECURE_HSTS_SECONDS', '31536000') or 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', 'True').lower() in ('true', '1', 'yes')
+SECURE_HSTS_PRELOAD = os.environ.get('DJANGO_SECURE_HSTS_PRELOAD', 'True').lower() in ('true', '1', 'yes')
+# Nginx 会在 HTTPS 部署时通过 X-Forwarded-Proto 告诉 Django 原始请求协议。
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# 当前 JWT 接口不使用 CSRF Cookie；即便 HTTP 部署也保持 True 以满足部署安全检查，
+# 未来新增 Cookie/Session 功能时再按部署协议调整。
+CSRF_COOKIE_SECURE = os.environ.get('DJANGO_CSRF_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
+
 
 # Application definition
 
@@ -100,7 +114,9 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # 跨域中间件,必须放在第一位
     'django.middleware.security.SecurityMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',  #去掉csrf
+    # JWT 认证不依赖 Cookie/Session，但保留 CSRF 中间件可消除部署安全检查 W003。
+    # 非 DRF 的普通 Django View（登录/退出）已使用 csrf_exempt 显式豁免。
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'log.middleware.RequestLogMiddleware', # 请求日志中间件
     'user.middleware.JwtAuthenticationMiddleware',  # JWT_TOKEN 认证中间件（唯一认证入口）

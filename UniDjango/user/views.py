@@ -2,6 +2,8 @@ import json
 from django.core.cache import cache
 from django.http import JsonResponse
 from django.views import View
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.password_validation import validate_password
@@ -34,7 +36,20 @@ def _get_login_lock_key(username, ip):
     return f'login_lock:{ip}:{username}'
 
 
+def _record_login_failure(fail_key, lock_key):
+    """记录一次登录失败，并在达到阈值后设置短时锁定。"""
+    try:
+        failures = (cache.get(fail_key) or 0) + 1
+        cache.set(fail_key, failures, LOGIN_LOCKOUT_SECONDS)
+        if failures >= LOGIN_MAX_FAILURES:
+            cache.set(lock_key, 1, LOGIN_LOCKOUT_SECONDS)
+            cache.delete(fail_key)
+    except Exception:
+        pass
+
+
 # Create your views here.
+@method_decorator(csrf_exempt, name='dispatch')
 class GenerateToken(View):
     """
     测试生成token
@@ -68,28 +83,11 @@ class GenerateToken(View):
         try:
             user = SysUser.objects.get(username=username)
         except SysUser.DoesNotExist:
-            try:
-                failures = (cache.get(fail_key) or 0) + 1
-                cache.set(fail_key, failures, LOGIN_LOCKOUT_SECONDS)
-                if failures >= LOGIN_MAX_FAILURES:
-                    cache.set(lock_key, 1, LOGIN_LOCKOUT_SECONDS)
-                    cache.delete(fail_key)
-            except Exception:
-                pass
+            _record_login_failure(fail_key, lock_key)
             return JsonResponse({'code': 401, 'message': '用户不存在或密码错误'}, status=401)
 
-        if not user.is_active:
-            return JsonResponse({'code': 403, 'message': '用户已被禁用'}, status=403)
-
-        if not check_password(password, user.password):
-            try:
-                failures = (cache.get(fail_key) or 0) + 1
-                cache.set(fail_key, failures, LOGIN_LOCKOUT_SECONDS)
-                if failures >= LOGIN_MAX_FAILURES:
-                    cache.set(lock_key, 1, LOGIN_LOCKOUT_SECONDS)
-                    cache.delete(fail_key)
-            except Exception:
-                pass
+        if not user.is_active or not check_password(password, user.password):
+            _record_login_failure(fail_key, lock_key)
             return JsonResponse({'code': 401, 'message': '用户不存在或密码错误'}, status=401)
 
         try:
@@ -128,6 +126,7 @@ class GetUserInfo(View):
         return JsonResponse({'code': 200, 'data': user_info})
         
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LogOut(View):
     """
     注销登录
