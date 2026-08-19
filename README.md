@@ -38,27 +38,45 @@
 
 ## 快速开始
 
-```bash
-./scripts/bootstrap.sh prod
-```
-
-脚本会自动准备 `.env`、生成缺失的 Django/JWT 密钥、构建并启动生产环境、初始化 `admin` 账号。MySQL、Redis 和 `admin` 使用同一个密码，可交互输入，也可以直接指定：
+### 全新环境
 
 ```bash
 ./scripts/bootstrap.sh prod --password 'MyStrongPass123'
 ```
 
-开发环境可用：
+脚本会自动准备 `.env`、生成缺失的 Django/JWT 密钥、构建并启动生产环境、初始化 `admin` 账号。MySQL、Redis 和 `admin` 使用同一个密码。
+
+### 开发环境
 
 ```bash
 ./scripts/bootstrap.sh dev
 ```
 
-也支持手动启动：
+### 开发完成，切到生产环境
+
+如果同一台机器已经初始化过数据库，只需要执行：
+
+```bash
+make dev-down
+make prod
+```
+
+不要再次运行 `bootstrap.sh`，避免覆盖现有密码并重置管理员。
+
+也支持直接使用脚本：
+
+```bash
+./scripts/dev.sh
+./scripts/prod.sh
+```
+
+更完整的启动、初始化和权限配置说明请查看 [docs/OPERATION.md](docs/OPERATION.md)。
+
+常用 Makefile 命令：
 
 ```bash
 make dev
 make prod
+make dev-down
+make prod-down
 ```
-
-更完整的启动、初始化和权限配置说明请查看 [docs/OPERATION.md](docs/OPERATION.md)。
