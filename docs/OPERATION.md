@@ -8,6 +8,20 @@
 
 ## 1. 开发阶段怎么用
 
+### 1.0 Rocky Linux 基础环境（仅首次）
+
+如果是 Rocky Linux 10.x 虚拟机，先执行：
+
+```bash
+sudo bash scripts/setup-rocky.sh
+```
+
+脚本会安装 Docker、Docker Compose 插件、Git、curl，并开放前端和后端端口。
+
+执行完后退出并重新登录，使 docker 组权限生效。
+
+这套项目通过 Docker Compose 运行，主机只需要 Docker 和 Docker Compose。Django、Vue、MySQL、Redis 都运行在容器中，不需要在 Rocky Linux 主机上单独安装。
+
 ### 1.1 首次启动开发环境
 
 ```bash
@@ -154,7 +168,8 @@ make prod
 ├── scripts/
 │   ├── bootstrap.sh           # 从零一键启动
 │   ├── dev.sh                 # 启动开发环境
-│   └── prod.sh                # 构建并启动生产环境
+│   ├── prod.sh                # 构建并启动生产环境
+│   └── setup-rocky.sh         # Rocky Linux 基础环境初始化
 ├── docker-compose.yml         # 生产环境编排
 ├── docker-compose-dev.yml     # 开发环境编排
 ├── Makefile                   # 常用命令封装
@@ -170,6 +185,14 @@ make prod
 | 生产环境 | `docker-compose.yml` | Gunicorn | Nginx 静态托管 |
 
 两个环境共用相同的容器名和端口，因此不能同时运行。
+
+组件由镜像提供：
+
+- MySQL：`mysql:8.0`
+- Redis：`redis:7-alpine`
+- Django：由 `UniDjango/Dockerfile` 基于 `python:3.12-slim` 构建
+- Vue：由 `frontend/Dockerfile` 基于 `node:22-alpine` 构建
+- 生产前端：最终运行在 `nginx:stable-alpine`
 
 ### 3.3 服务与端口
 

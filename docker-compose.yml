@@ -7,7 +7,7 @@ services:
     restart: always
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
-      - ./redis_data:/data
+      - ./redis_data:/data:Z
     networks:
       - ylf-network
     ports:
@@ -21,7 +21,7 @@ services:
     image: ${MYSQL_CONTAINER_NAME}:latest # <--- 显式指定镜像名
     container_name: ${MYSQL_CONTAINER_NAME}
     volumes:
-      - ./db_data:/var/lib/mysql
+      - ./db_data:/var/lib/mysql:Z
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -69,7 +69,7 @@ services:
       sh -c "python manage.py migrate --noinput &&
       gunicorn UniDjango.wsgi:application --bind 0.0.0.0:8000 --timeout 300 --workers 2"
     volumes:
-      - ./UniDjango/media:/app/media
+      - ./UniDjango/media:/app/media:z
     depends_on:
       - db
       - redis
@@ -93,8 +93,8 @@ services:
       # - "80:80" # 开发模式下注释掉，避免端口冲突
       - "${FRONTEND_PORT}:${FRONTEND_INTERNAL_PORT}" # 映射到其他端口
     volumes:
-      - ./UniDjango/media:/media:ro  # 媒体文件由 Nginx 直接托管
-      - ./frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro  # 便于更新反代配置
+      - ./UniDjango/media:/media:ro,z  # 媒体文件由 Nginx 直接托管
+      - ./frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,z  # 便于更新反代配置
     depends_on:
       - backend
     networks:

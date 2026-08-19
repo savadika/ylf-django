@@ -7,7 +7,7 @@ services:
     restart: always
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
-      - ./redis_data:/data
+      - ./redis_data:/data:Z
     networks:
       - ylf-network
     ports:
@@ -19,7 +19,7 @@ services:
     image: ${BACKEND_CONTAINER_NAME}:latest
     entrypoint: ["/wait-for-mysql.sh", "sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:${BACKEND_INTERNAL_PORT}"]
     volumes:
-      - ./UniDjango:/app
+      - ./UniDjango:/app:Z
     environment:
       # 调试模式
       - DEBUG=True
@@ -64,7 +64,7 @@ services:
     image: ${MYSQL_CONTAINER_NAME}:latest
     container_name: ${MYSQL_CONTAINER_NAME}
     volumes:
-      - ./db_data:/var/lib/mysql
+      - ./db_data:/var/lib/mysql:Z
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -82,7 +82,7 @@ services:
     container_name: ${FRONTEND_CONTAINER_NAME}
     working_dir: /app
     volumes:
-      - ./frontend:/app  # <--- 挂载源码，实现热重载
+      - ./frontend:/app:Z  # <--- 挂载源码，实现热重载
       - /app/node_modules # <--- 隔离 node_modules，避免宿主机与容器环境冲突
     # 启动命令：安装依赖并启动开发服务器
     # 注意：第一次启动可能会慢，因为要 install
