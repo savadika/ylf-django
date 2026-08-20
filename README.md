@@ -48,6 +48,31 @@ sudo bash scripts/setup-rocky.sh
 
 这套项目使用 Docker Compose 运行，因此主机上只需要 Docker 和 Docker Compose。Django、Vue、MySQL、Redis 都由镜像提供，**不需要在 Rocky Linux 主机上单独安装**。
 
+### Docker 镜像加速（国内服务器建议）
+
+如果服务器访问 Docker Hub 超时，例如运行 bootstrap 时出现：
+
+```text
+Image redis:7-alpine Error failed to resolve reference "docker.io/library/redis:7-alpine"
+dial tcp ... i/o timeout
+```
+
+先执行一键脚本配置国内镜像加速，并预拉取 UniDjango 所需镜像：
+
+```bash
+sudo bash scripts/fix-docker-mirror.sh
+```
+
+脚本会备份并合并 `/etc/docker/daemon.json`，重启 Docker，然后预拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。
+
+如果只想配置镜像源、暂时不拉取镜像：
+
+```bash
+sudo bash scripts/fix-docker-mirror.sh --no-pull
+```
+
+配置完成后再执行下面的快速开始命令。
+
 ## 快速开始
 
 ### 1. 开发先启动开发环境
