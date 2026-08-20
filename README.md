@@ -30,6 +30,14 @@
 ```
 
 
+安装git
+```bash
+dnf install git 
+```
+
+
+
+
 ## 1   Rocky Linux 环境初始化
 
 如果部署在 Rocky Linux 10.x 虚拟机，首次执行：
@@ -63,6 +71,25 @@ docker images
 ```bash
 ./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
 ```
+
+### 4 安装agent
+
+安装node +npm
+```bash
+node 
+```
+
+npm更换源+ 接入deepseek
+
+```bash
+npm config set registry https://registry.npmmirror.com
+npm install codex
+bash <(curl -fsSL https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh)
+```
+
+
+
+
 
 
 ### 其他
