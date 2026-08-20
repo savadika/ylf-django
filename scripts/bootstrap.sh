@@ -160,7 +160,8 @@ echo "等待后端就绪..."
 backend_ready=0
 for _ in $(seq 1 120); do
     if docker compose -f "$COMPOSE_FILE" ps -q backend >/dev/null 2>&1 &&
-       docker compose -f "$COMPOSE_FILE" exec -T backend python manage.py check >/dev/null 2>&1; then
+       docker compose -f "$COMPOSE_FILE" exec -T backend python manage.py migrate --check \
+           >/dev/null 2>&1; then
         backend_ready=1
         break
     fi
