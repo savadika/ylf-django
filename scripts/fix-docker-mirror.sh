@@ -1,40 +1,57 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 
+# 按实际可用性和响应速度排序的 Docker Hub 镜像加速器。
+# 脚本启动时会并行探测，再按延迟从快到慢重新排序。
 MIRRORS=(
-  "https://docker.xuanyuan.me"
-  "https://docker.1ms.run"
-  "https://docker.1panel.live"
-  "https://hub.rat.dev"
-  "https://docker.m.daocloud.io"
+    "https://docker.m.daocloud.io"
+    "https://docker.1ms.run"
+    "https://hub.rat.dev"
+    "https://docker.xuanyuan.me"
+    "https://dockerproxy.net"
+    "https://dytt.online"
+    "https://docker.1panel.live"
 )
 
-BASE_IMAGES=(
-  "redis:7-alpine"
-  "mysql:8.0"
-  "python:3.12-slim"
-  "node:22-alpine"
-  "nginx:stable-alpine"
+# UniDjango 构建时需要的基础镜像。
+# node:22 用于开发镜像，node:22-alpine/nginx 用于生产前端镜像。
+DEFAULT_IMAGES=(
+    "redis:7-alpine"
+    "mysql:8.0"
+    "python:3.12-slim"
+    "node:22-alpine"
+    "node:22"
+    "nginx:stable-alpine"
 )
 
 PULL_IMAGES=1
 FORCE_CONFIGURE=0
-PULL_TIMEOUT=300
-PULL_KILL_AFTER=15
+NO_RESTART=0
+PULL_TIMEOUT=120
+PULL_KILL_AFTER=10
+PROBE_TIMEOUT=6
+PULL_PARALLEL=2
+ONLY_IMAGES=()
+EXTRA_IMAGES=()
 
 usage() {
     cat <<'EOF'
 用法：sudo bash scripts/fix-docker-mirror.sh [选项]
 
-一键配置 Docker Hub 国内镜像加速器，并预拉取 UniDjango 所需镜像。
+探测可用的 Docker Hub 国内镜像源，按响应速度排序后写入 /etc/docker/daemon.json，
+并预拉取 UniDjango 构建所需的基础镜像。
 
 选项：
-  --no-pull      只配置镜像加速器，不拉取镜像
-  --force        即使检测不到可用镜像站，也强制写入配置
-  --timeout 秒   单个镜像源拉取超时，默认 300 秒
-  -h, --help     显示帮助
+  --no-pull        只配置镜像加速器，不拉取镜像
+  --force          即使没有探测到可用镜像源，也强制写入配置
+  --timeout 秒     单个镜像源拉取超时，默认 120 秒
+  --parallel 数量   同时拉取的镜像数量，默认 2，范围 1-4
+  --only "镜像..."  只拉取指定镜像，覆盖默认镜像列表
+  --image 镜像     额外增加一个要拉取的镜像，可重复使用
+  --no-restart     只生成配置，不重启 Docker 服务
+  -h, --help       显示帮助
 EOF
 }
 
@@ -48,12 +65,40 @@ while [[ $# -gt 0 ]]; do
             FORCE_CONFIGURE=1
             shift
             ;;
+        --no-restart)
+            NO_RESTART=1
+            shift
+            ;;
         --timeout)
             if [[ -z "${2:-}" || ! "$2" =~ ^[0-9]+$ ]]; then
                 echo "--timeout 需要正整数秒数" >&2
                 exit 1
             fi
             PULL_TIMEOUT="$2"
+            shift 2
+            ;;
+        --parallel)
+            if [[ -z "${2:-}" || ! "$2" =~ ^[1-4]$ ]]; then
+                echo "--parallel 需要 1-4 之间的整数" >&2
+                exit 1
+            fi
+            PULL_PARALLEL="$2"
+            shift 2
+            ;;
+        --only)
+            if [[ -z "${2:-}" ]]; then
+                echo "--only 后面需要镜像列表" >&2
+                exit 1
+            fi
+            IFS=' ' read -r -a ONLY_IMAGES <<< "$2"
+            shift 2
+            ;;
+        --image)
+            if [[ -z "${2:-}" ]]; then
+                echo "--image 后面需要镜像名称" >&2
+                exit 1
+            fi
+            EXTRA_IMAGES+=("$2")
             shift 2
             ;;
         -h|--help)
@@ -78,39 +123,61 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-registry_probe() {
+if ! docker info >/dev/null 2>&1; then
+    echo "Docker daemon 当前不可用，请先启动 Docker 后再运行本脚本。" >&2
+    exit 1
+fi
+
+probe_tmp="$(mktemp -d)"
+trap 'rm -rf "$probe_tmp"' EXIT
+
+probe_mirror() {
     local mirror="$1"
-    local result
-    result="$(curl -sS -o /dev/null -w '%{http_code} %{time_total}' --max-time 8 "${mirror}/v2/" 2>/dev/null || true)"
-    printf '%s\n' "$result"
+    local out="$2"
+    local result code elapsed speed
+
+    result="$(curl -sS -o /dev/null -w '%{http_code} %{time_total} %{speed_download}' \
+        --max-time "$PROBE_TIMEOUT" "$mirror/v2/" 2>/dev/null || true)"
+    read -r code elapsed speed <<< "$result"
+
+    # 401/403 也是正常的，代表服务可达但要求认证。
+    case "$code" in
+        200|301|302|401|403)
+            printf '%s %s\n' "$elapsed" "$mirror" > "$out"
+            ;;
+        *)
+            : > "$out"
+            ;;
+    esac
 }
 
 selected_mirrors=()
 if command -v curl >/dev/null 2>&1; then
-    mirror_probe_results=()
-    for mirror in "${MIRRORS[@]}"; do
-        probe="$(registry_probe "$mirror")"
-        code="${probe%% *}"
-        elapsed="${probe##* }"
-        if [[ -n "$code" && "$code" != "000" ]]; then
-            mirror_probe_results+=("${elapsed}|${mirror}")
-            echo "✅ 镜像站可用：$mirror（${elapsed}s）"
-        else
-            echo "⚠️  镜像站暂不可达：$mirror"
-        fi
+    echo "正在并行探测镜像源..."
+    for i in "${!MIRRORS[@]}"; do
+        probe_mirror "${MIRRORS[$i]}" "$probe_tmp/$i" &
     done
+    wait
 
-    if [[ ${#mirror_probe_results[@]} -gt 0 ]]; then
-        while IFS='|' read -r _ mirror; do
-            [[ -z "$mirror" ]] && continue
-            selected_mirrors+=("$mirror")
-        done < <(printf '%s\n' "${mirror_probe_results[@]}" | sort -g -t'|' -k1,1)
+    while read -r elapsed mirror; do
+        [[ -n "$mirror" ]] && selected_mirrors+=("$mirror")
+    done < <(for f in "$probe_tmp"/*; do
+        cat "$f"
+    done | sort -g -k1,1)
+
+    if [[ ${#selected_mirrors[@]} -gt 0 ]]; then
+        echo "✅ 按速度排序后的镜像源："
+        for mirror in "${selected_mirrors[@]}"; do
+            echo "   - $mirror"
+        done
+    else
+        echo "⚠️  未探测到可用镜像源。"
     fi
 
     if [[ ${#selected_mirrors[@]} -eq 0 && "$FORCE_CONFIGURE" -ne 1 ]]; then
-        echo "未检测到可用镜像站，服务器对外网 HTTPS 访问可能被限制。" >&2
+        echo "服务器对外网 HTTPS 访问可能被限制。" >&2
         echo "请先联系网络管理员开放外网，或配置 Docker HTTP/HTTPS 代理后重试。" >&2
-        echo "若仍要写入这些镜像地址，可加 --force。" >&2
+        echo "若仍要写入默认镜像地址，可加 --force。" >&2
         exit 1
     fi
 fi
@@ -127,14 +194,15 @@ if [[ -f /etc/docker/daemon.json ]]; then
 fi
 
 if command -v python3 >/dev/null 2>&1; then
-    export DOCKER_MIRRORS_JSON
-    DOCKER_MIRRORS_JSON="$(printf '%s\n' "${selected_mirrors[@]}" | python3 -c 'import sys,json; print(json.dumps([x for x in (line.strip() for line in sys.stdin) if x]))')"
+    export DOCKER_SELECTED_MIRRORS
+    DOCKER_SELECTED_MIRRORS="$(printf '%s\n' "${selected_mirrors[@]}" | \
+        python3 -c 'import sys,json; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
     python3 - <<'PY'
 import json
 import os
 
 path = "/etc/docker/daemon.json"
-mirrors = json.loads(os.environ["DOCKER_MIRRORS_JSON"])
+selected = json.loads(os.environ["DOCKER_SELECTED_MIRRORS"])
 config = {}
 
 if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -143,10 +211,24 @@ if os.path.exists(path) and os.path.getsize(path) > 0:
     except json.JSONDecodeError as exc:
         raise SystemExit(f"/etc/docker/daemon.json 不是有效 JSON，请先检查备份文件：{exc}") from exc
 
-config.setdefault("registry-mirrors", [])
-for mirror in mirrors:
-    if mirror not in config["registry-mirrors"]:
-        config["registry-mirrors"].append(mirror)
+existing = config.get("registry-mirrors", [])
+merged = [mirror for mirror in selected]
+for mirror in existing:
+    if mirror not in merged:
+        merged.append(mirror)
+config["registry-mirrors"] = merged
+
+# 提高并发层下载能力，这是大镜像“卡在 Pulling fs layer”时最有效的加速项之一。
+for key, minimum in (
+    ("max-concurrent-downloads", 10),
+    ("max-concurrent-uploads", 5),
+    ("max-download-attempts", 5),
+):
+    try:
+        old = int(config.get(key, 0))
+    except (TypeError, ValueError):
+        old = 0
+    config[key] = max(old, minimum)
 
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(config, handle, indent=2, ensure_ascii=False)
@@ -155,7 +237,7 @@ PY
 else
     if [[ -f /etc/docker/daemon.json ]]; then
         echo "未找到 python3，且已有 /etc/docker/daemon.json，无法安全合并配置。" >&2
-        echo "请手动编辑该文件并加入 registry-mirrors。" >&2
+        echo "请安装 python3 后重试，或手动编辑该文件加入 registry-mirrors。" >&2
         exit 1
     fi
 
@@ -169,17 +251,28 @@ else
                 echo "    \"${selected_mirrors[$i]}\""
             fi
         done
-        echo '  ]'
+        echo '  ],'
+        echo '  "max-concurrent-downloads": 10,'
+        echo '  "max-concurrent-uploads": 5,'
+        echo '  "max-download-attempts": 5'
         echo '}'
     } > /etc/docker/daemon.json
 fi
 
-systemctl daemon-reload
-systemctl restart docker
+if [[ "$NO_RESTART" -eq 0 ]]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload
+        systemctl restart docker
+    elif command -v service >/dev/null 2>&1; then
+        service docker restart
+    else
+        echo "未找到 systemctl/service，请手动重启 Docker 使配置生效。" >&2
+    fi
+fi
 
 echo
 echo "当前 Docker 镜像加速配置："
-docker info | grep -A5 "Registry Mirrors" || true
+docker info 2>/dev/null | grep -A8 "Registry Mirrors" || true
 
 run_pull_with_timeout() {
     if command -v timeout >/dev/null 2>&1; then
@@ -201,31 +294,57 @@ pull_image_with_fallback() {
             ref="${host}/library/${image}"
         fi
 
-        echo "==> docker pull ${ref}（镜像源：${mirror}，超时：${PULL_TIMEOUT}s）"
+        echo "==> ${image}：尝试 ${mirror}（超时 ${PULL_TIMEOUT}s）"
         if run_pull_with_timeout docker pull "$ref"; then
             if [[ "$ref" != "$image" ]]; then
                 docker tag "$ref" "$image"
                 docker rmi "$ref" >/dev/null 2>&1 || true
             fi
-            echo "✅ ${image} 已通过 ${mirror} 拉取完成"
+            echo "✅ ${image} 已拉取完成"
             return 0
         fi
 
-        echo "⚠️  ${mirror} 拉取 ${image} 超时或失败，尝试下一个镜像源。"
+        echo "⚠️  ${mirror} 拉取 ${image} 失败或超时，尝试下一个镜像源。"
     done
 
-    echo "==> docker pull ${image}（Docker 默认源兜底）"
+    echo "==> ${image}：使用 Docker 默认源兜底"
     run_pull_with_timeout docker pull "$image"
 }
 
 if [[ "$PULL_IMAGES" -eq 1 ]]; then
+    images=()
+    if [[ ${#ONLY_IMAGES[@]} -gt 0 ]]; then
+        images=("${ONLY_IMAGES[@]}")
+    else
+        images=("${DEFAULT_IMAGES[@]}")
+    fi
+    images+=("${EXTRA_IMAGES[@]}")
+
+    # 去重，同时避免重复并发拉取同一个镜像。
+    mapfile -t images < <(printf '%s\n' "${images[@]}" | sed '/^[[:space:]]*$/d' | sort -u)
+
     echo
-    echo "开始预拉取 UniDjango 所需镜像..."
+    echo "开始预拉取镜像（并发数：${PULL_PARALLEL}）..."
+    pids=()
+    pid_images=()
     failed_images=()
-    for image in "${BASE_IMAGES[@]}"; do
-        if ! pull_image_with_fallback "$image"; then
-            failed_images+=("$image")
-            echo "❌ ${image} 在所有镜像源均未拉取成功。" >&2
+    running=0
+
+    for image in "${images[@]}"; do
+        if (( running >= PULL_PARALLEL )); then
+            wait -n || true
+            running=$((running - 1))
+        fi
+
+        pull_image_with_fallback "$image" &
+        pids+=("$!")
+        pid_images+=("$image")
+        running=$((running + 1))
+    done
+
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}"; then
+            failed_images+=("${pid_images[$i]}")
         fi
     done
 

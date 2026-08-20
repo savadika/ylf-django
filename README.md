@@ -57,14 +57,15 @@ dial tcp ... i/o timeout
 sudo bash scripts/fix-docker-mirror.sh
 ```
 
-脚本会先探测可用的国内镜像站并按响应速度排序，备份并合并 `/etc/docker/daemon.json`，重启 Docker，然后逐个镜像源拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。单个镜像源默认最多等待 300 秒，超时会自动切换到下一个镜像源。
+脚本会先并行探测可用的国内镜像站并按响应速度排序，备份并合并 `/etc/docker/daemon.json`，开启 Docker 并发层下载，重启 Docker，然后预拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。单个镜像源默认最多等待 120 秒，超时会自动切换到下一个镜像源；默认同时拉取 2 个镜像。
 
-脚本内置的公共镜像源当前包括 `docker.xuanyuan.me`、`docker.1ms.run`、`docker.1panel.live`、`hub.rat.dev` 和 `docker.m.daocloud.io`。
+脚本内置的公共镜像源当前包括 `docker.m.daocloud.io`、`docker.1ms.run`、`hub.rat.dev`、`docker.xuanyuan.me`、`dockerproxy.net`、`dytt.online` 和 `docker.1panel.live`。
 
-如果拉取大镜像时长时间卡在 `Downloading` 或 `Pulling fs layer`，先按 `Ctrl+C` 结束，再用更短的单源超时重试：
+如果拉取大镜像时长时间卡在 `Downloading` 或 `Pulling fs layer`，先按 `Ctrl+C` 结束，再用更短的单源超时重试，或提高镜像并发数：
 
 ```bash
 sudo bash scripts/fix-docker-mirror.sh --timeout 120
+sudo bash scripts/fix-docker-mirror.sh --timeout 90 --parallel 3
 ```
 
 常用选项：
@@ -72,7 +73,11 @@ sudo bash scripts/fix-docker-mirror.sh --timeout 120
 ```text
 --no-pull      只配置镜像加速器，不拉取镜像
 --force        即使未探测到可用镜像站，也强制写入配置
---timeout 秒   单个镜像源拉取超时，默认 300 秒
+--timeout 秒   单个镜像源拉取超时，默认 120 秒
+--parallel 数量 同时拉取的镜像数量，默认 2，范围 1-4
+--only "镜像..." 只拉取指定镜像，覆盖默认镜像列表
+--image 镜像   额外增加一个要拉取的镜像，可重复使用
+--no-restart   只生成配置，不重启 Docker 服务
 ```
 
 配置完成后再执行下面的快速开始命令
