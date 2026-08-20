@@ -75,7 +75,7 @@ sudo bash scripts/fix-docker-mirror.sh --timeout 120
 --timeout 秒   单个镜像源拉取超时，默认 300 秒
 ```
 
-配置完成后再执行下面的快速开始命令。
+配置完成后再执行下面的快速开始命令
 
 ## 快速开始
 
