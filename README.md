@@ -65,12 +65,6 @@ sudo bash scripts/fix-docker-mirror.sh
 
 脚本会备份并合并 `/etc/docker/daemon.json`，重启 Docker，然后预拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。
 
-如果只想配置镜像源、暂时不拉取镜像：
-
-```bash
-sudo bash scripts/fix-docker-mirror.sh --no-pull
-```
-
 配置完成后再执行下面的快速开始命令。
 
 ## 快速开始
