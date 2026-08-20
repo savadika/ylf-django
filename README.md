@@ -30,7 +30,7 @@
 ```
 
 
-## Rocky Linux 环境初始化
+## 1   Rocky Linux 环境初始化
 
 如果部署在 Rocky Linux 10.x 虚拟机，首次执行：
 
@@ -38,18 +38,8 @@
 sudo bash scripts/setup-rocky.sh
 ```
 
-该脚本会安装 Docker、Docker Compose 插件、Git、curl，并开放 `9530` 和 `8002` 端口。执行完成后退出并重新登录，让 docker 组权限生效。
 
-这套项目使用 Docker Compose 运行，因此主机上只需要 Docker 和 Docker Compose。Django、Vue、MySQL、Redis 都由镜像提供，**不需要在 Rocky Linux 主机上单独安装**。
-
-### Docker 镜像加速（国内服务器建议）
-
-如果服务器访问 Docker Hub 超时，例如运行 bootstrap 时出现：
-
-```text
-Image redis:7-alpine Error failed to resolve reference "docker.io/library/redis:7-alpine"
-dial tcp ... i/o timeout
-```
+### 2  Docker 镜像加速（国内服务器建议）
 
 先执行一键脚本配置国内镜像加速，并预拉取 UniDjango 所需镜像：
 
@@ -57,61 +47,23 @@ dial tcp ... i/o timeout
 sudo bash scripts/fix-docker-mirror.sh
 ```
 
-脚本会先并行探测可用的国内镜像站并按响应速度排序，备份并合并 `/etc/docker/daemon.json`，开启 Docker 并发层下载，重启 Docker，然后预拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。单个镜像源默认最多等待 120 秒，超时会自动切换到下一个镜像源；默认同时拉取 2 个镜像。
-
-脚本内置的公共镜像源当前包括 `docker.m.daocloud.io`、`docker.1ms.run`、`hub.rat.dev`、`docker.xuanyuan.me`、`dockerproxy.net`、`dytt.online` 和 `docker.1panel.live`。
-
-如果拉取大镜像时长时间卡在 `Downloading` 或 `Pulling fs layer`，先按 `Ctrl+C` 结束，再用更短的单源超时重试，或提高镜像并发数：
+查看当前镜像是否全部拉取
 
 ```bash
-sudo bash scripts/fix-docker-mirror.sh --timeout 120
-sudo bash scripts/fix-docker-mirror.sh --timeout 90 --parallel 3
+docker images
 ```
 
-常用选项：
 
-```text
---no-pull      只配置镜像加速器，不拉取镜像
---force        即使未探测到可用镜像站，也强制写入配置
---timeout 秒   单个镜像源拉取超时，默认 120 秒
---parallel 数量 同时拉取的镜像数量，默认 2，范围 1-4
---only "镜像..." 只拉取指定镜像，覆盖默认镜像列表
---image 镜像   额外增加一个要拉取的镜像，可重复使用
---host-ip IP   同时把该 IP 写入 .env 的 SERVER_HOST 和 DJANGO_ALLOWED_HOSTS
---no-restart   只生成配置，不重启 Docker 服务
-```
-
-配置完成后再执行下面的快速开始命令
-
-### 服务器 IP 自动识别
+### 启动开发环境
 
 `bootstrap.sh` 启动时会自动检测当前服务器的非 Docker 网卡 IP，并写入 `.env` 的 `SERVER_HOST` 和 `DJANGO_ALLOWED_HOSTS`，最终输出正确的访问地址。
 
-如果自动识别结果不正确，可以手动指定：
+如果自动识别结果不正确，可以手动指定，替换掉密码和服务器地址
 
 ```bash
 ./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
 ```
 
-也可以在配置镜像加速时一并写入：
-
-```bash
-sudo bash scripts/fix-docker-mirror.sh --host-ip 172.16.100.55
-```
-
-注意：`fix-docker-mirror.sh` 只有在 `.env` 已经存在时才会写入 IP；如果 `.env` 尚未创建，先运行 `bootstrap.sh`，它会在创建 `.env` 时自动处理 IP。
-
-## 快速开始
-
-### 1. 开发先启动开发环境
-
-```bash
-./scripts/bootstrap.sh dev --password 'CommonPass123'
-```
-
-脚本会自动准备 `.env`、生成缺失的 Django/JWT 密钥、构建并启动开发环境、初始化 `admin` 账号。MySQL、Redis 和 `admin` 使用同一个密码。
-
-开发环境使用源码挂载和热重载，适合日常开发。
 
 ### 2. 开发完成后切换到生产环境
 
@@ -142,32 +94,3 @@ make prod-down
 ```
 
 更完整的说明请查看 [docs/OPERATION.md](docs/OPERATION.md)。
-
-## 常见问题
-
-### 打开页面提示 `Failed to compile` 或 `ENOENT: open '/app/src/main.js'`
-
-这是 Vue 开发服务器没有挂载到前端源码导致的，通常是开发容器没有从项目根目录通过 Compose 启动，或者旧的开发容器卷挂载不正确。
-
-处理步骤：
-
-```bash
-cd /path/to/UniDjango-framework
-
-# 清理旧的开发容器
-docker compose -f docker-compose-dev.yml down
-
-# 如果之前运行过生产前端，先停止它，避免 9530 端口冲突
-docker compose -f docker-compose.yml stop frontend
-
-# 重新启动开发环境
-./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
-```
-
-启动后验证源码是否挂载成功：
-
-```bash
-docker compose -f docker-compose-dev.yml exec frontend ls -l /app/src/main.js
-```
-
-如果仍然提示文件不存在，请确认命令是在仓库根目录执行，并且宿主机上存在 `frontend/src/main.js`。
