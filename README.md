@@ -54,7 +54,7 @@ docker images
 ```
 
 
-### 启动开发环境
+### 3 启动开发环境
 
 `bootstrap.sh` 启动时会自动检测当前服务器的非 Docker 网卡 IP，并写入 `.env` 的 `SERVER_HOST` 和 `DJANGO_ALLOWED_HOSTS`，最终输出正确的访问地址。
 
@@ -65,7 +65,7 @@ docker images
 ```
 
 
-### 2. 开发完成后切换到生产环境
+### 其他
 
 同一台机器已经初始化过数据库时，只需要执行：
 
