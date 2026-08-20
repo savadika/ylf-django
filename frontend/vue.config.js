@@ -62,9 +62,9 @@ module.exports = {
     // 将 Docker 环境变量注入到客户端代码中
     plugins: [
       new (require('webpack').DefinePlugin)({
-        'process.env.VUE_APP_BASE_API': JSON.stringify(process.env.VUE_APP_BASE_API),
-        'process.env.VUE_APP_BACKEND_PORT': JSON.stringify(process.env.VUE_APP_BACKEND_PORT),
-        'process.env.VUE_APP_SERVER_HOST': JSON.stringify(process.env.VUE_APP_SERVER_HOST),
+        'process.env.VUE_APP_BASE_API': JSON.stringify(process.env.VUE_APP_BASE_API || ''),
+        'process.env.VUE_APP_BACKEND_PORT': JSON.stringify(process.env.VUE_APP_BACKEND_PORT || ''),
+        'process.env.VUE_APP_SERVER_HOST': JSON.stringify(process.env.VUE_APP_SERVER_HOST || ''),
         'process.env.VUE_APP_SERVER_PROTOCOL': JSON.stringify(process.env.VUE_APP_SERVER_PROTOCOL || 'http')
       })
     ]

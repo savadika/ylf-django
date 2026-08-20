@@ -88,22 +88,45 @@ random_hex() {
     fi
 }
 
+is_valid_ipv4() {
+    [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
 detect_server_ip() {
     local detected=""
 
+    # 优先通过默认路由推导本机对外使用的源 IP，
+    # 这样能自动避开 docker0、br-*、veth* 等容器网桥地址。
     if command -v ip >/dev/null 2>&1; then
         detected="$(
+            ip -4 route get 1.1.1.1 2>/dev/null |
+                awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}'
+        )"
+    fi
+
+    # 回退方案一：扫描 scope global 的非回环 IPv4，并过滤容器网络接口。
+    if [[ -z "$detected" ]] && command -v ip >/dev/null 2>&1; then
+        detected="$(
             ip -4 -o addr show scope global 2>/dev/null |
-                awk '$2 !~ /^(docker[0-9]*|br-[0-9a-f]+|veth[0-9a-f]+|virbr[0-9]*)$/ {print $4; exit}' |
+                awk '$2 !~ /^(lo|docker[0-9]*|br-[0-9a-f]+|veth[0-9a-f]+|virbr[0-9]*|cni[0-9]*|flannel[0-9.]*|cali[0-9a-f]+)$/ {print $4; exit}' |
                 cut -d/ -f1
         )"
     fi
 
+    # 回退方案二：某些精简系统没有 iproute2，但仍有 hostname。
     if [[ -z "$detected" ]] && command -v hostname >/dev/null 2>&1; then
-        detected="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        detected="$(
+            hostname -I 2>/dev/null |
+                tr ' ' '\n' |
+                awk '$0 !~ /^127\./ && $0 !~ /^(172\.(1[6-9]|2[0-9]|3[0-1])\.0\.1)$/ {print; exit}'
+        )"
     fi
 
-    printf '%s\n' "$detected"
+    if is_valid_ipv4 "$detected" && [[ "$detected" != "127.0.0.1" ]]; then
+        printf '%s\n' "$detected"
+    else
+        printf ''
+    fi
 }
 
 get_env_value() {
@@ -147,21 +170,28 @@ if [[ -z "$SERVER_IP" ]]; then
     SERVER_IP="$(detect_server_ip)"
 fi
 
-if [[ -n "$SERVER_IP" && "$SERVER_IP" != "127.0.0.1" ]]; then
-    set_env_value .env "SERVER_HOST" "$SERVER_IP"
-
-    current_allowed="$(get_env_value .env "DJANGO_ALLOWED_HOSTS")"
-    if ! printf '%s\n' "$current_allowed" | tr ',' '\n' | grep -qxF "$SERVER_IP"; then
-        if [[ -n "$current_allowed" ]]; then
-            set_env_value .env "DJANGO_ALLOWED_HOSTS" "${current_allowed},${SERVER_IP}"
-        else
-            set_env_value .env "DJANGO_ALLOWED_HOSTS" "localhost,127.0.0.1,${SERVER_IP}"
-        fi
-    fi
-    echo "已设置服务器访问地址：${SERVER_IP}"
-else
-    SERVER_IP="127.0.0.1"
+if [[ -z "$SERVER_IP" ]]; then
+    echo "无法自动识别服务器实际 IP，请使用 --host-ip 手动指定。" >&2
+    echo "例如：./scripts/bootstrap.sh $MODE --host-ip 172.16.100.54" >&2
+    exit 1
 fi
+
+if [[ "$SERVER_IP" != "127.0.0.1" ]] && ! is_valid_ipv4 "$SERVER_IP"; then
+    echo "无效的服务器地址：${SERVER_IP}。--host-ip 需要是 IPv4 地址。" >&2
+    exit 1
+fi
+
+set_env_value .env "SERVER_HOST" "$SERVER_IP"
+
+current_allowed="$(get_env_value .env "DJANGO_ALLOWED_HOSTS")"
+if ! printf '%s\n' "$current_allowed" | tr ',' '\n' | grep -qxF "$SERVER_IP"; then
+    if [[ -n "$current_allowed" ]]; then
+        set_env_value .env "DJANGO_ALLOWED_HOSTS" "${current_allowed},${SERVER_IP}"
+    else
+        set_env_value .env "DJANGO_ALLOWED_HOSTS" "localhost,127.0.0.1,${SERVER_IP}"
+    fi
+fi
+echo "已设置服务器访问地址：${SERVER_IP}"
 
 ensure_secret_key "DJANGO_SECRET_KEY"
 ensure_secret_key "JWT_SECRET_KEY"
@@ -198,6 +228,15 @@ fi
 
 FRONTEND_PORT="$(get_env_value .env "$PORT_KEY")"
 FRONTEND_PORT="${FRONTEND_PORT:-9530}"
+
+if [[ "$MODE" == "dev" ]]; then
+    OTHER_COMPOSE_FILE="docker-compose.yml"
+else
+    OTHER_COMPOSE_FILE="docker-compose-dev.yml"
+fi
+
+echo "正在停止可能冲突的 ${OTHER_COMPOSE_FILE} 容器..."
+docker compose -f "$OTHER_COMPOSE_FILE" down --remove-orphans >/dev/null 2>&1 || true
 
 echo "正在构建并启动 ${MODE} 环境..."
 docker compose -f "$COMPOSE_FILE" up -d --build

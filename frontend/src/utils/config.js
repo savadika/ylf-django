@@ -14,7 +14,20 @@ export const getServerProtocol = () => {
 
 // 获取服务器主机地址
 export const getServerHost = () => {
-  return process.env.VUE_APP_SERVER_HOST || window.location.hostname
+  const configuredHost = process.env.VUE_APP_SERVER_HOST
+
+  // 127.0.0.1、localhost、0.0.0.0 只对容器或本机有意义；
+  // 浏览器从外部访问时如果继续使用它们，会请求到用户自己的电脑，而不是服务器。
+  if (
+    configuredHost &&
+    configuredHost !== '127.0.0.1' &&
+    configuredHost !== 'localhost' &&
+    configuredHost !== '0.0.0.0'
+  ) {
+    return configuredHost
+  }
+
+  return window.location.hostname
 }
 
 // 获取后端端口
