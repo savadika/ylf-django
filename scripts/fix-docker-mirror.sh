@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 MIRRORS=(
   "https://docker.xuanyuan.me"
   "https://docker.1ms.run"
+  "https://docker.1panel.live"
+  "https://hub.rat.dev"
   "https://docker.m.daocloud.io"
 )
 

@@ -59,6 +59,8 @@ sudo bash scripts/fix-docker-mirror.sh
 
 脚本会先探测可用的国内镜像站并按响应速度排序，备份并合并 `/etc/docker/daemon.json`，重启 Docker，然后逐个镜像源拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。单个镜像源默认最多等待 300 秒，超时会自动切换到下一个镜像源。
 
+脚本内置的公共镜像源当前包括 `docker.xuanyuan.me`、`docker.1ms.run`、`docker.1panel.live`、`hub.rat.dev` 和 `docker.m.daocloud.io`。
+
 如果拉取大镜像时长时间卡在 `Downloading` 或 `Pulling fs layer`，先按 `Ctrl+C` 结束，再用更短的单源超时重试：
 
 ```bash
