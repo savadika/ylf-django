@@ -29,12 +29,6 @@
 └── .env.example              # 环境变量模板
 ```
 
-## 已移除的内容
-
-- 业务策略模块：quant、lof、etfArb、volume、bond、oversold、industry、chinext
-- 前端业务页面：`frontend/src/views/bu` 及对应业务 API
-- 数据库、Redis 数据、媒体上传文件、备份与回测结果
-- `.env`、密钥、内部 IP 与 tushare/numpy 等业务依赖
 
 ## Rocky Linux 环境初始化
 
@@ -63,7 +57,21 @@ dial tcp ... i/o timeout
 sudo bash scripts/fix-docker-mirror.sh
 ```
 
-脚本会备份并合并 `/etc/docker/daemon.json`，重启 Docker，然后预拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。
+脚本会先探测可用的国内镜像站并按响应速度排序，备份并合并 `/etc/docker/daemon.json`，重启 Docker，然后逐个镜像源拉取 Redis、MySQL、Python、Node、Nginx 等依赖镜像。单个镜像源默认最多等待 300 秒，超时会自动切换到下一个镜像源。
+
+如果拉取大镜像时长时间卡在 `Downloading` 或 `Pulling fs layer`，先按 `Ctrl+C` 结束，再用更短的单源超时重试：
+
+```bash
+sudo bash scripts/fix-docker-mirror.sh --timeout 120
+```
+
+常用选项：
+
+```text
+--no-pull      只配置镜像加速器，不拉取镜像
+--force        即使未探测到可用镜像站，也强制写入配置
+--timeout 秒   单个镜像源拉取超时，默认 300 秒
+```
 
 配置完成后再执行下面的快速开始命令。
 
