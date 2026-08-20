@@ -62,6 +62,11 @@ docker images
 ```
 
 
+git源码下载
+```bash
+git clone https://用户名:密码@github.com/用户名/仓库名.git
+```
+
 ### 3 启动开发环境
 
 `bootstrap.sh` 启动时会自动检测当前服务器的非 Docker 网卡 IP，并写入 `.env` 的 `SERVER_HOST` 和 `DJANGO_ALLOWED_HOSTS`，最终输出正确的访问地址。
