@@ -6,12 +6,10 @@ cd "$(dirname "$0")/.."
 # 按实际可用性和响应速度排序的 Docker Hub 镜像加速器。
 # 脚本启动时会并行探测，再按延迟从快到慢重新排序。
 MIRRORS=(
-    "https://docker.m.daocloud.io"
     "https://docker.1ms.run"
-    "https://hub.rat.dev"
+    "https://docker.m.daocloud.io"
     "https://docker.xuanyuan.me"
-    "https://dockerproxy.net"
-    "https://dytt.online"
+    "https://docker.sparkcr.cn"
     "https://docker.1panel.live"
 )
 
@@ -29,10 +27,11 @@ DEFAULT_IMAGES=(
 PULL_IMAGES=1
 FORCE_CONFIGURE=0
 NO_RESTART=0
-PULL_TIMEOUT=120
+PULL_TIMEOUT=300
 PULL_KILL_AFTER=10
 PROBE_TIMEOUT=6
 PULL_PARALLEL=2
+PULL_RACE=2
 ONLY_IMAGES=()
 EXTRA_IMAGES=()
 SERVER_HOST_IP="${SERVER_HOST_IP:-}"
@@ -47,7 +46,7 @@ usage() {
 选项：
   --no-pull        只配置镜像加速器，不拉取镜像
   --force          即使没有探测到可用镜像源，也强制写入配置
-  --timeout 秒     单个镜像源拉取超时，默认 120 秒
+  --timeout 秒     单个镜像源拉取超时，默认 300 秒
   --parallel 数量   同时拉取的镜像数量，默认 2，范围 1-4
   --only "镜像..."  只拉取指定镜像，覆盖默认镜像列表
   --image 镜像     额外增加一个要拉取的镜像，可重复使用
@@ -185,21 +184,40 @@ detect_server_ip() {
 probe_mirror() {
     local mirror="$1"
     local out="$2"
-    local result code elapsed speed
+    local headers code manifest_code elapsed
 
-    result="$(curl -sS -o /dev/null -w '%{http_code} %{time_total} %{speed_download}' \
-        --max-time "$PROBE_TIMEOUT" "$mirror/v2/" 2>/dev/null || true)"
-    read -r code elapsed speed <<< "$result"
+    # 先探测 /v2/，并校验它真的带有 Docker Registry 的响应头。
+    # 一些看似返回 200 的站点其实只是普通网页，不能当作镜像源。
+    headers="$(curl -sS -D - -o /dev/null --max-time "$PROBE_TIMEOUT" "$mirror/v2/" 2>/dev/null || true)"
+    if ! printf '%s\n' "$headers" | grep -qi 'docker-distribution-api-version:'; then
+        : > "$out"
+        return
+    fi
 
-    # 401/403 也是正常的，代表服务可达但要求认证。
+    code="$(printf '%s\n' "$headers" | awk 'NR == 1 {print $2}')"
     case "$code" in
-        200|301|302|401|403)
-            printf '%s %s\n' "$elapsed" "$mirror" > "$out"
-            ;;
+        200|301|302|401|403) ;;
         *)
             : > "$out"
+            return
             ;;
     esac
+
+    # 再用一个真实 manifest 探测后端是否可用。401/404 也是正常的：
+    # 未认证时 401，仓库不存在时 404；但 502/503 说明代理后端已经坏了。
+    manifest_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$PROBE_TIMEOUT" \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json' \
+        "$mirror/v2/library/alpine/manifests/3.20" 2>/dev/null || true)"
+    case "$manifest_code" in
+        200|401|404) ;;
+        *)
+            : > "$out"
+            return
+            ;;
+    esac
+
+    elapsed="$(curl -sS -o /dev/null -w '%{time_total}' --max-time "$PROBE_TIMEOUT" "$mirror/v2/" 2>/dev/null || true)"
+    [[ -n "$elapsed" ]] && printf '%s %s\n' "$elapsed" "$mirror" > "$out"
 }
 
 selected_mirrors=()
@@ -251,6 +269,7 @@ if command -v python3 >/dev/null 2>&1; then
     python3 - <<'PY'
 import json
 import os
+from urllib.parse import urlparse
 
 path = "/etc/docker/daemon.json"
 selected = json.loads(os.environ["DOCKER_SELECTED_MIRRORS"])
@@ -263,9 +282,17 @@ if os.path.exists(path) and os.path.getsize(path) > 0:
         raise SystemExit(f"/etc/docker/daemon.json 不是有效 JSON，请先检查备份文件：{exc}") from exc
 
 existing = config.get("registry-mirrors", [])
+selected_set = set(selected)
+dead_hosts = {"dockerproxy.net", "dytt.online"}
 merged = [mirror for mirror in selected]
 for mirror in existing:
-    if mirror not in merged:
+    try:
+        host = urlparse(mirror).netloc.lower()
+    except (TypeError, ValueError):
+        host = ""
+    if host in dead_hosts:
+        continue
+    if mirror not in selected_set:
         merged.append(mirror)
 config["registry-mirrors"] = merged
 
@@ -336,8 +363,91 @@ run_pull_with_timeout() {
 pull_image_with_fallback() {
     local image="$1"
     local mirror host ref
+    local pids=()
+    local race_dir
+    local winner=""
+    local remaining
 
+    race_dir="$(mktemp -d)"
+
+    # 让前几个镜像源并发拉取，任何一个成功就立即使用；
+    # 避免“排第一的源接口很快、实际下载很慢”时把整张镜像卡死。
+    local tried=0
     for mirror in "${selected_mirrors[@]}"; do
+        ((tried += 1))
+        host="${mirror#https://}"
+        if [[ "$image" == */* ]]; then
+            ref="${host}/${image}"
+        else
+            ref="${host}/library/${image}"
+        fi
+
+        echo "==> ${image}：并发尝试 ${mirror}（超时 ${PULL_TIMEOUT}s）"
+        if command -v setsid >/dev/null 2>&1; then
+            export PULL_TIMEOUT PULL_KILL_AFTER
+            export -f run_pull_with_timeout
+            (
+                exec setsid bash -c '
+                    if run_pull_with_timeout docker pull "$1" >/dev/null 2>&1; then
+                        printf "%s\n" "$1" > "$2/winner"
+                        exit 0
+                    fi
+                    exit 1
+                ' _ "$ref" "$race_dir"
+            ) &
+        else
+            (
+                if run_pull_with_timeout docker pull "$ref" >/dev/null 2>&1; then
+                    printf '%s\n' "$ref" > "$race_dir/winner"
+                    exit 0
+                fi
+                exit 1
+            ) &
+        fi
+        pids+=("$!")
+
+        if (( tried >= PULL_RACE )); then
+            break
+        fi
+    done
+
+    remaining="${#pids[@]}"
+    while (( remaining > 0 )); do
+        if [[ -f "$race_dir/winner" ]]; then
+            winner="$(cat "$race_dir/winner")"
+            break
+        fi
+
+        wait -n || true
+        remaining=$((remaining - 1))
+    done
+
+    if [[ -n "$winner" ]]; then
+        if command -v setsid >/dev/null 2>&1; then
+            for pid in "${pids[@]}"; do
+                kill -- -"$pid" 2>/dev/null || true
+            done
+        else
+            for pid in "${pids[@]}"; do
+                kill "$pid" 2>/dev/null || true
+            done
+        fi
+        wait "${pids[@]}" 2>/dev/null || true
+
+        if [[ "$winner" != "$image" ]]; then
+            docker tag "$winner" "$image"
+            docker rmi "$winner" >/dev/null 2>&1 || true
+        fi
+        rm -rf "$race_dir"
+        echo "✅ ${image} 已拉取完成"
+        return 0
+    fi
+
+    wait "${pids[@]}" 2>/dev/null || true
+    rm -rf "$race_dir"
+
+    # 前几个源都没成功时，再按顺序尝试剩余源。
+    for mirror in "${selected_mirrors[@]:$PULL_RACE}"; do
         host="${mirror#https://}"
         if [[ "$image" == */* ]]; then
             ref="${host}/${image}"
@@ -376,28 +486,34 @@ if [[ "$PULL_IMAGES" -eq 1 ]]; then
 
     echo
     echo "开始预拉取镜像（并发数：${PULL_PARALLEL}）..."
-    pids=()
-    pid_images=()
+    status_dir="$(mktemp -d)"
     failed_images=()
     running=0
 
-    for image in "${images[@]}"; do
+    for idx in "${!images[@]}"; do
         if (( running >= PULL_PARALLEL )); then
             wait -n || true
             running=$((running - 1))
         fi
 
-        pull_image_with_fallback "$image" &
-        pids+=("$!")
-        pid_images+=("$image")
+        (
+            if pull_image_with_fallback "${images[$idx]}"; then
+                printf '0\n' > "$status_dir/$idx"
+            else
+                printf '1\n' > "$status_dir/$idx"
+            fi
+        ) &
         running=$((running + 1))
     done
 
-    for i in "${!pids[@]}"; do
-        if ! wait "${pids[$i]}"; then
-            failed_images+=("${pid_images[$i]}")
+    wait || true
+
+    for idx in "${!images[@]}"; do
+        if [[ "$(cat "$status_dir/$idx" 2>/dev/null || printf '1')" != "0" ]]; then
+            failed_images+=("${images[$idx]}")
         fi
     done
+    rm -rf "$status_dir"
 
     if [[ ${#failed_images[@]} -eq 0 ]]; then
         echo
