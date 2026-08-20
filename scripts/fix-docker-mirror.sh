@@ -35,6 +35,7 @@ PROBE_TIMEOUT=6
 PULL_PARALLEL=2
 ONLY_IMAGES=()
 EXTRA_IMAGES=()
+SERVER_HOST_IP="${SERVER_HOST_IP:-}"
 
 usage() {
     cat <<'EOF'
@@ -50,6 +51,7 @@ usage() {
   --parallel 数量   同时拉取的镜像数量，默认 2，范围 1-4
   --only "镜像..."  只拉取指定镜像，覆盖默认镜像列表
   --image 镜像     额外增加一个要拉取的镜像，可重复使用
+  --host-ip IP     同时把该 IP 写入 .env 的 SERVER_HOST 和 DJANGO_ALLOWED_HOSTS
   --no-restart     只生成配置，不重启 Docker 服务
   -h, --help       显示帮助
 EOF
@@ -101,6 +103,14 @@ while [[ $# -gt 0 ]]; do
             EXTRA_IMAGES+=("$2")
             shift 2
             ;;
+        --host-ip)
+            if [[ -z "${2:-}" ]]; then
+                echo "--host-ip 后面需要 IP 地址" >&2
+                exit 1
+            fi
+            SERVER_HOST_IP="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -130,6 +140,47 @@ fi
 
 probe_tmp="$(mktemp -d)"
 trap 'rm -rf "$probe_tmp"' EXIT
+
+get_env_value() {
+    local file="$1"
+    local key="$2"
+    local value=""
+
+    value="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+    printf '%s\n' "$value"
+}
+
+set_env_value() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    local escaped_value
+    escaped_value="$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')"
+
+    if grep -qE "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
+detect_server_ip() {
+    local detected=""
+
+    if command -v ip >/dev/null 2>&1; then
+        detected="$(
+            ip -4 -o addr show scope global 2>/dev/null |
+                awk '$2 !~ /^(docker[0-9]*|br-[0-9a-f]+|veth[0-9a-f]+|virbr[0-9]*)$/ {print $4; exit}' |
+                cut -d/ -f1
+        )"
+    fi
+
+    if [[ -z "$detected" ]] && command -v hostname >/dev/null 2>&1; then
+        detected="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    fi
+
+    printf '%s\n' "$detected"
+}
 
 probe_mirror() {
     local mirror="$1"
@@ -360,6 +411,27 @@ if [[ "$PULL_IMAGES" -eq 1 ]]; then
 else
     echo
     echo "✅ 镜像加速配置完成。"
+fi
+
+if [[ -f .env ]]; then
+    SERVER_IP="${SERVER_HOST_IP:-$(detect_server_ip)}"
+    if [[ -n "$SERVER_IP" && "$SERVER_IP" != "127.0.0.1" ]]; then
+        set_env_value .env "SERVER_HOST" "$SERVER_IP"
+
+        current_allowed="$(get_env_value .env "DJANGO_ALLOWED_HOSTS")"
+        if ! printf '%s\n' "$current_allowed" | tr ',' '\n' | grep -qxF "$SERVER_IP"; then
+            if [[ -n "$current_allowed" ]]; then
+                set_env_value .env "DJANGO_ALLOWED_HOSTS" "${current_allowed},${SERVER_IP}"
+            else
+                set_env_value .env "DJANGO_ALLOWED_HOSTS" "localhost,127.0.0.1,${SERVER_IP}"
+            fi
+        fi
+        echo
+        echo "已设置服务器访问地址：${SERVER_IP}"
+    fi
+else
+    echo
+    echo "未找到 .env，跳过服务器 IP 配置；运行 bootstrap.sh 时会自动识别。"
 fi
 
 echo

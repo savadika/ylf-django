@@ -7,6 +7,7 @@ MODE="prod"
 ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
 COMMON_PASSWORD="${BOOTSTRAP_PASSWORD:-}"
+BOOTSTRAP_HOST_IP="${BOOTSTRAP_HOST_IP:-}"
 
 usage() {
     cat <<'EOF'
@@ -23,11 +24,13 @@ usage() {
   --admin-username <name>      管理员用户名，默认 admin
   --password <password>        MySQL、Redis 和 admin 的共用密码；不传则交互输入
   --admin-email <email>        管理员邮箱，默认 admin@example.com
+  --host-ip <ip>               手动指定服务器访问 IP；不传则自动识别
   -h, --help                   显示帮助
 
 示例：
   ./scripts/bootstrap.sh prod
   ./scripts/bootstrap.sh dev --password 'MyStrongPass123'
+  ./scripts/bootstrap.sh prod --host-ip 172.16.100.55
 EOF
 }
 
@@ -61,6 +64,10 @@ while [[ $# -gt 0 ]]; do
             ADMIN_EMAIL="${2:-}"
             shift 2
             ;;
+        --host-ip)
+            BOOTSTRAP_HOST_IP="${2:-}"
+            shift 2
+            ;;
         prod|dev|-h|--help)
             shift
             ;;
@@ -79,6 +86,24 @@ random_hex() {
     else
         od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n'
     fi
+}
+
+detect_server_ip() {
+    local detected=""
+
+    if command -v ip >/dev/null 2>&1; then
+        detected="$(
+            ip -4 -o addr show scope global 2>/dev/null |
+                awk '$2 !~ /^(docker[0-9]*|br-[0-9a-f]+|veth[0-9a-f]+|virbr[0-9]*)$/ {print $4; exit}' |
+                cut -d/ -f1
+        )"
+    fi
+
+    if [[ -z "$detected" ]] && command -v hostname >/dev/null 2>&1; then
+        detected="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    fi
+
+    printf '%s\n' "$detected"
 }
 
 get_env_value() {
@@ -115,6 +140,27 @@ ensure_secret_key() {
 if [[ ! -f .env ]]; then
     cp .env.example .env
     echo "已创建 .env"
+fi
+
+SERVER_IP="${BOOTSTRAP_HOST_IP:-}"
+if [[ -z "$SERVER_IP" ]]; then
+    SERVER_IP="$(detect_server_ip)"
+fi
+
+if [[ -n "$SERVER_IP" && "$SERVER_IP" != "127.0.0.1" ]]; then
+    set_env_value .env "SERVER_HOST" "$SERVER_IP"
+
+    current_allowed="$(get_env_value .env "DJANGO_ALLOWED_HOSTS")"
+    if ! printf '%s\n' "$current_allowed" | tr ',' '\n' | grep -qxF "$SERVER_IP"; then
+        if [[ -n "$current_allowed" ]]; then
+            set_env_value .env "DJANGO_ALLOWED_HOSTS" "${current_allowed},${SERVER_IP}"
+        else
+            set_env_value .env "DJANGO_ALLOWED_HOSTS" "localhost,127.0.0.1,${SERVER_IP}"
+        fi
+    fi
+    echo "已设置服务器访问地址：${SERVER_IP}"
+else
+    SERVER_IP="127.0.0.1"
 fi
 
 ensure_secret_key "DJANGO_SECRET_KEY"
@@ -182,9 +228,9 @@ cat <<EOF
 
 ✅ 启动完成
 
-访问地址：http://127.0.0.1:${FRONTEND_PORT}
+访问地址：http://${SERVER_IP}:${FRONTEND_PORT}
 管理员账号：${ADMIN_USERNAME}
 统一密码：${COMMON_PASSWORD}
 
-MySQL、Redis 和 admin 均使用上述统一密码。请妥善保存。若要让局域网/公网访问，请编辑 .env 中的 DJANGO_ALLOWED_HOSTS 和 SERVER_HOST。
+MySQL、Redis 和 admin 均使用上述统一密码。请妥善保存。脚本已自动将检测到的服务器 IP 写入 .env 的 SERVER_HOST 和 DJANGO_ALLOWED_HOSTS。
 EOF

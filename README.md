@@ -77,10 +77,29 @@ sudo bash scripts/fix-docker-mirror.sh --timeout 90 --parallel 3
 --parallel 数量 同时拉取的镜像数量，默认 2，范围 1-4
 --only "镜像..." 只拉取指定镜像，覆盖默认镜像列表
 --image 镜像   额外增加一个要拉取的镜像，可重复使用
+--host-ip IP   同时把该 IP 写入 .env 的 SERVER_HOST 和 DJANGO_ALLOWED_HOSTS
 --no-restart   只生成配置，不重启 Docker 服务
 ```
 
 配置完成后再执行下面的快速开始命令
+
+### 服务器 IP 自动识别
+
+`bootstrap.sh` 启动时会自动检测当前服务器的非 Docker 网卡 IP，并写入 `.env` 的 `SERVER_HOST` 和 `DJANGO_ALLOWED_HOSTS`，最终输出正确的访问地址。
+
+如果自动识别结果不正确，可以手动指定：
+
+```bash
+./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
+```
+
+也可以在配置镜像加速时一并写入：
+
+```bash
+sudo bash scripts/fix-docker-mirror.sh --host-ip 172.16.100.55
+```
+
+注意：`fix-docker-mirror.sh` 只有在 `.env` 已经存在时才会写入 IP；如果 `.env` 尚未创建，先运行 `bootstrap.sh`，它会在创建 `.env` 时自动处理 IP。
 
 ## 快速开始
 
@@ -123,3 +142,32 @@ make prod-down
 ```
 
 更完整的说明请查看 [docs/OPERATION.md](docs/OPERATION.md)。
+
+## 常见问题
+
+### 打开页面提示 `Failed to compile` 或 `ENOENT: open '/app/src/main.js'`
+
+这是 Vue 开发服务器没有挂载到前端源码导致的，通常是开发容器没有从项目根目录通过 Compose 启动，或者旧的开发容器卷挂载不正确。
+
+处理步骤：
+
+```bash
+cd /path/to/UniDjango-framework
+
+# 清理旧的开发容器
+docker compose -f docker-compose-dev.yml down
+
+# 如果之前运行过生产前端，先停止它，避免 9530 端口冲突
+docker compose -f docker-compose.yml stop frontend
+
+# 重新启动开发环境
+./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
+```
+
+启动后验证源码是否挂载成功：
+
+```bash
+docker compose -f docker-compose-dev.yml exec frontend ls -l /app/src/main.js
+```
+
+如果仍然提示文件不存在，请确认命令是在仓库根目录执行，并且宿主机上存在 `frontend/src/main.js`。
