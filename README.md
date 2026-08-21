@@ -96,7 +96,7 @@ npm更换源+ 接入deepseek
 
 ```bash
 npm config set registry https://registry.npmmirror.com
-npm install codex
+npm install -g @openai/codex
 bash <(curl -fsSL https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh)
 ```
 
