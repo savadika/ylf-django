@@ -89,7 +89,7 @@ git clone https://用户名:密码@github.com/用户名/仓库名.git
 安装node +npm
 
 ```bash
-dnf install node 
+dnf install nodejs 
 ```
 
 npm更换源+ 接入deepseek
