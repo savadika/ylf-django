@@ -36,8 +36,6 @@ dnf install git
 ```
 
 
-
-
 ## 1   Rocky Linux 环境初始化
 
 如果部署在 Rocky Linux 10.x 虚拟机，首次执行：
@@ -49,11 +47,22 @@ sudo bash scripts/setup-rocky.sh
 
 ### 2  Docker 镜像加速（国内服务器建议）
 
-先执行一键脚本配置国内镜像加速，并预拉取 UniDjango 所需镜像：
+先执行一键脚本配置国内镜像加速
 
 ```bash
-sudo bash scripts/fix-docker-mirror.sh
+sudo bash scripts/switch-docker-mirror.sh
 ```
+
+然后拉取docker镜像
+```bash
+docker pull redis:7-alpine
+docker pull mysql:8.0
+docker pull python:3.12-slim
+docker pull node:22-alpine
+docker pull node:22
+docker pull nginx:stable-alpine
+```
+
 
 查看当前镜像是否全部拉取
 
@@ -69,19 +78,18 @@ git clone https://用户名:密码@github.com/用户名/仓库名.git
 
 ### 3 启动开发环境
 
-`bootstrap.sh` 启动时会自动检测当前服务器的非 Docker 网卡 IP，并写入 `.env` 的 `SERVER_HOST` 和 `DJANGO_ALLOWED_HOSTS`，最终输出正确的访问地址。
-
-如果自动识别结果不正确，可以手动指定，替换掉密码和服务器地址
-
 ```bash
 ./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
 ```
 
+
+
 ### 4 安装agent
 
 安装node +npm
+
 ```bash
-node 
+dnf install node 
 ```
 
 npm更换源+ 接入deepseek
