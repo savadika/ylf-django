@@ -105,6 +105,13 @@ bash <(curl -fsSL https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh)
 
 
 
+
+
+
+
+
+
+
 ### 其他
 
 同一台机器已经初始化过数据库时，只需要执行：
