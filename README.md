@@ -46,6 +46,14 @@ sudo bash scripts/setup-rocky.sh
 ```
 
 
+
+git源码下载
+```bash
+git clone https://用户名:密码@github.com/用户名/仓库名.git
+```
+
+
+
 ### 2  Docker 镜像加速（国内服务器建议）
 
 先执行一键脚本配置国内镜像加速
@@ -72,17 +80,11 @@ docker images
 ```
 
 
-git源码下载
-```bash
-git clone https://用户名:密码@github.com/用户名/仓库名.git
-```
-
 ### 3 启动开发环境
 
 ```bash
 ./scripts/bootstrap.sh dev --password 'CommonPass123' --host-ip 172.16.100.55
 ```
-
 
 
 ### 4 安装agent
