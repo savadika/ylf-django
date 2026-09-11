@@ -47,8 +47,8 @@ const actions = {
     return new Promise((resolve, reject) => {
       login({ username: username.trim(), password: password }).then(response => {
         //此处修改为自己的登录逻辑
-        commit('SET_TOKEN', response.token)
-        setToken(response.token)
+        commit('SET_TOKEN', response.data.token)
+        setToken(response.data.token)
         resolve()
       }).catch(error => {
         reject(error)
@@ -77,7 +77,7 @@ const actions = {
         try {
           console.log('[user/getInfo] ID missing, trying to fetch via getUserList for username:', username)
           const listRes = await getUserList({ username })
-          const users = listRes.results || listRes.data || listRes
+          const users = listRes.results || (listRes.data && listRes.data.results) || listRes.data || listRes
           if (Array.isArray(users)) {
             const found = users.find(u => u.username === username)
             if (found) {

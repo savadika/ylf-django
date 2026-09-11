@@ -1,11 +1,11 @@
 from django.db import models
 from user.models import SysUser
+from utils.models import BaseModel
 
-class SysLog(models.Model):
+class SysLog(BaseModel):
     """
     系统日志表
     """
-    id = models.AutoField(primary_key=True, verbose_name='日志ID')
     user = models.ForeignKey(SysUser, on_delete=models.SET_NULL, null=True, verbose_name='操作用户')
     ip = models.CharField(max_length=50, null=True, verbose_name='访问IP')
     method = models.CharField(max_length=10, null=True, verbose_name='请求方式')
@@ -13,7 +13,7 @@ class SysLog(models.Model):
     params = models.TextField(null=True, verbose_name='请求参数')
     status = models.IntegerField(default=200, verbose_name='响应状态码')
     cost_time = models.FloatField(null=True, verbose_name='耗时(ms)')
-    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    create_time = models.DateTimeField(auto_now_add=True, null=True, verbose_name='创建时间')
     
     # 错误监控字段
     log_type = models.CharField(max_length=10, default='INFO', verbose_name='日志类型') # INFO / ERROR

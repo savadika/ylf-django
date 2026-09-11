@@ -10,6 +10,30 @@ NProgress.configure({ showSpinner: false })
 
 const whiteList = ['/login']
 
+// 找到第一个可访问的路由路径：根路径 / 登录后重定向到这里，
+// 这样没有“首页”权限的角色会落到自己的第一个菜单，而不是 404。
+function getFirstAccessiblePath(routes) {
+  const visit = (list, base) => {
+    for (const route of list || []) {
+      if (!route || route.hidden) continue
+      const p = route.path || ''
+      let full = base
+      if (p) {
+        full = p.startsWith('/') ? p : `${base}/${p}`.replace(/\/+/g, '/')
+      }
+      const children = (route.children || []).filter(c => c && !c.hidden)
+      if (children.length) {
+        const nested = visit(children, full)
+        if (nested) return nested
+      } else if (route.component || p) {
+        return full
+      }
+    }
+    return null
+  }
+  return visit(routes, '') || '/404'
+}
+
 router.beforeEach(async(to, from, next) => {
   NProgress.start()
   document.title = getPageTitle(to.meta.title)
@@ -41,6 +65,15 @@ router.beforeEach(async(to, from, next) => {
           // 确保新路由生效，避免空白页或404
           return next({ ...to, replace: true })
         }
+
+        // 根路径重定向到第一个有权限的路由
+        if (to.path === '/') {
+          const firstPath = getFirstAccessiblePath(store.state.permission.addRoutes || [])
+          next({ path: firstPath, replace: true })
+          NProgress.done()
+          return
+        }
+
         next()
       } catch (error) {
         await store.dispatch('user/resetToken')

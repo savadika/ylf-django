@@ -1,22 +1,24 @@
 from rest_framework import viewsets, serializers
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from django.db import transaction
 from .models import SysRole, SysUserRole
 from menu.models import SysMenu
 from menu.models import SysRoleMenu
-from utils.pagination import CustomPageNumberPagination
 from utils.filters import create_complex_filter_class
 from utils.permissions import permission_required_for_action
+from utils.viewsets import BaseModelViewSet
+from utils.response import Ok
+from utils.exceptions import ApiException
+from utils.serializers import BaseModelSerializer
 
 
-class SysRoleSerializer(serializers.ModelSerializer):
+class SysRoleSerializer(BaseModelSerializer):
     class Meta:
         model = SysRole
         fields = ('id', 'name', 'code', 'create_time', 'update_time', 'remark')
 
 
-class SysRoleViewSet(viewsets.ModelViewSet):
+class SysRoleViewSet(BaseModelViewSet):
     """
     角色资源：提供列表、详情、创建、更新、局部更新、删除
     路由由 SimpleRouter 生成：/department 与 /department/{id}
@@ -40,9 +42,10 @@ class SysRoleViewSet(viewsets.ModelViewSet):
         'destroy': 'system:role:delete',
         'menus': 'system:role:permission',
         'update_permissions': 'system:role:permission',
+        'advanced_search': 'system:role:list',
+        'filter_options': 'system:role:list',
     })]
-    pagination_class = CustomPageNumberPagination   # 自定义分页类
-    filterset_class = create_complex_filter_class(SysRole, search_fields=['name', 'code', 'remark', 'create_time', 'update_time'])  # 动态创建的过滤器类，查询
+    filterset_class = create_complex_filter_class(SysRole, search_fields=['name', 'code', 'remark'])  # 动态创建的过滤器类，查询
     http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']   # 允许的HTTP方法
 
     def perform_destroy(self, instance):
@@ -60,12 +63,9 @@ class SysRoleViewSet(viewsets.ModelViewSet):
         """
         role = self.get_object()
         menu_tree, permissions = role.get_role_menus()  
-        return Response({
-            'code': 200,
-            'data': {
-                'menus': menu_tree,
-                'permissions': permissions
-            }
+        return Ok(data={
+            'menus': menu_tree,
+            'permissions': permissions
         })
 
     @action(detail=True, methods=['put'], url_path='permissions')
@@ -80,39 +80,30 @@ class SysRoleViewSet(viewsets.ModelViewSet):
         permissions = request.data.get('permissions', [])
         
         if not isinstance(permissions, list):
-            return Response({'code': 400, 'message': 'permissions must be a list'}, status=400)
+            raise ApiException('permissions must be a list', status_code=400)
 
         unique_menu_ids = set()
         for menu_id in permissions:
             try:
                 unique_menu_ids.add(int(menu_id))
             except (TypeError, ValueError):
-                return Response({'code': 400, 'message': 'permissions 中只能包含菜单 ID'}, status=400)
+                raise ApiException('permissions 中只能包含菜单 ID', status_code=400)
 
         if unique_menu_ids:
             valid_count = SysMenu.objects.filter(id__in=unique_menu_ids).count()
             if valid_count != len(unique_menu_ids):
-                return Response({'code': 400, 'message': '存在无效的菜单 ID'}, status=400)
+                raise ApiException('存在无效的菜单 ID', status_code=400)
 
-        try:
-            with transaction.atomic():
-                # 1. 删除旧的权限
-                SysRoleMenu.objects.filter(role=role).delete()
-                
-                # 2. 插入新的权限
-                new_relations = []
-                for menu_id in unique_menu_ids:
-                    new_relations.append(SysRoleMenu(role=role, menu_id=menu_id))
-                
-                # 只有当有新权限时才执行批量创建
-                if len(new_relations) > 0:
-                    SysRoleMenu.objects.bulk_create(new_relations)
-                    
-            return Response({'code': 200, 'message': '权限更新成功'})
+        with transaction.atomic():
+            # 1. 删除旧的权限
+            SysRoleMenu.objects.filter(role=role).delete()
             
-        except Exception as e:
-            # 捕获可能的数据库完整性错误（如无效的 menu_id）
-            return Response({'code': 500, 'message': f'更新失败: {str(e)}'}, status=500)
+            # 2. 插入新的权限
+            new_relations = [SysRoleMenu(role=role, menu_id=menu_id) for menu_id in unique_menu_ids]
+            if new_relations:
+                SysRoleMenu.objects.bulk_create(new_relations)
+
+        return Ok(data=None)
 
 
 

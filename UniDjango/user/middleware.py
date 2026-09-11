@@ -4,6 +4,7 @@ from django.utils.deprecation import MiddlewareMixin
 from jwt import ExpiredSignatureError,InvalidTokenError,PyJWTError
 from user.models import SysUser
 from user.jwt_auth import decode_token, get_token_from_request, is_token_revoked
+from utils.exceptions import CacheUnavailable
 
 
 class JwtAuthenticationMiddleware(MiddlewareMixin):
@@ -32,27 +33,29 @@ class JwtAuthenticationMiddleware(MiddlewareMixin):
 
         token = get_token_from_request(request)
         if not token:
-            return JsonResponse({'code': 401, 'message': '缺少token'}, status=401)
+            return JsonResponse({'code': 401, 'message': '缺少token', 'data': None}, status=401)
 
         try:
             payload = decode_token(token)
             if is_token_revoked(payload):
-                return JsonResponse({'code': 401, 'message': 'token已失效'}, status=401)
+                return JsonResponse({'code': 401, 'message': 'token已失效', 'data': None}, status=401)
             user_id = payload.get('user_id')
             user = SysUser.objects.get(id=user_id)
+        except CacheUnavailable:
+            return JsonResponse({'code': 503, 'message': '认证服务暂不可用', 'data': None}, status=503)
         except ExpiredSignatureError:
-            return JsonResponse({'code': 401, 'message': 'token已过期'}, status=401)
+            return JsonResponse({'code': 401, 'message': 'token已过期', 'data': None}, status=401)
         except InvalidTokenError:
-            return JsonResponse({'code': 401, 'message': '无效的token'}, status=401)
+            return JsonResponse({'code': 401, 'message': '无效的token', 'data': None}, status=401)
         except PyJWTError:
-            return JsonResponse({'code': 401, 'message': 'token解析错误'}, status=401)
+            return JsonResponse({'code': 401, 'message': 'token解析错误', 'data': None}, status=401)
         except SysUser.DoesNotExist:
-            return JsonResponse({'code': 401, 'message': '用户不存在'}, status=401)
+            return JsonResponse({'code': 401, 'message': '用户不存在', 'data': None}, status=401)
         except (TypeError, ValueError):
-            return JsonResponse({'code': 401, 'message': '无效的token'}, status=401)
+            return JsonResponse({'code': 401, 'message': '无效的token', 'data': None}, status=401)
 
         if not getattr(user, 'is_active', False):
-            return JsonResponse({'code': 403, 'message': '用户已被禁用'}, status=403)
+            return JsonResponse({'code': 403, 'message': '用户已被禁用', 'data': None}, status=403)
 
         # 将用户信息附加到 request 中
         request.user = user

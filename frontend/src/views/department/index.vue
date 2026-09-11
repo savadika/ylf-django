@@ -279,7 +279,12 @@ export default {
         this.tableData = Array.isArray(rows) ? rows.map(row => this.normalizeRow(row)) : []
         this.pagination.total = response.count || response.data?.count || response.total || response.data?.total || 0
       } catch (error) {
-        this.$message.error('获取数据失败')
+        if (error.response && error.response.status === 403) {
+          this.tableData = []
+          this.pagination.total = 0
+        } else {
+          this.$message.error('获取数据失败')
+        }
       } finally {
         this.loading = false
       }

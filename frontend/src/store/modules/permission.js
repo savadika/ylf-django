@@ -99,6 +99,16 @@ function transformMenusToRoutes(menus = [], parentPath = '') {
       const compPath = normalizeComponentPath(menu.component)
       if (compPath === '__LAYOUT__' || menu.component === 'Layout') {
         route.component = Layout
+      } else if (!parentPath) {
+        // 顶级页面型菜单（如首页）：用 Layout 包裹，页面作为默认子路由，保留侧边栏/顶栏
+        route.component = Layout
+        route.children = [{
+          path: '',
+          name: menu.name,
+          component: loadView(compPath),
+          meta
+        }]
+        delete route.name
       } else {
         route.component = loadView(compPath)
       }

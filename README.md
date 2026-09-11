@@ -32,6 +32,7 @@
 
 安装git
 ```bash
+dnf update
 dnf install git 
 ```
 

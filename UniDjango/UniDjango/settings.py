@@ -82,8 +82,9 @@ SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SECURE_SSL_REDIRECT', 'False').lowe
 SECURE_HSTS_SECONDS = int(os.environ.get('DJANGO_SECURE_HSTS_SECONDS', '31536000') or 0)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', 'True').lower() in ('true', '1', 'yes')
 SECURE_HSTS_PRELOAD = os.environ.get('DJANGO_SECURE_HSTS_PRELOAD', 'True').lower() in ('true', '1', 'yes')
-# Nginx 会在 HTTPS 部署时通过 X-Forwarded-Proto 告诉 Django 原始请求协议。
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# 仅在存在可信反向代理时才信任 X-Forwarded-Proto；开发环境（TRUSTED_PROXY_COUNT=0）
+# 后端端口可能直接暴露，若不关闭该头，客户端可伪造 X-Forwarded-Proto 欺骗 request.is_secure()。
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if TRUSTED_PROXY_COUNT >= 1 else None
 # 当前 JWT 接口不使用 CSRF Cookie；即便 HTTP 部署也保持 True 以满足部署安全检查，
 # 未来新增 Cookie/Session 功能时再按部署协议调整。
 CSRF_COOKIE_SECURE = os.environ.get('DJANGO_CSRF_COOKIE_SECURE', 'True').lower() in ('true', '1', 'yes')
@@ -232,7 +233,8 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',  # 启用django-filter过滤后端
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'utils.pagination.CustomPageNumberPagination',
+    'EXCEPTION_HANDLER': 'utils.exceptions.api_exception_handler',
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'user.authentication.PreAuthenticatedAuthentication', # 使用中间件认证的结果
     ], 

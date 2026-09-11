@@ -248,9 +248,10 @@
         <el-form-item label="角色" prop="roles">
           <el-select 
             v-model="form.roles" 
+            multiple
+            collapse-tags
             placeholder="请选择角色" 
             style="width: 100%"
-            @change="$forceUpdate()"
           >
             <el-option
               v-for="item in roleOptions"
@@ -264,7 +265,7 @@
           <el-input v-model="form.username" placeholder="请输入用户名" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="form.password" placeholder="请输入密码" />
+          <el-input v-model="form.password" placeholder="新增时必填，编辑时留空不修改" />
         </el-form-item>
         <el-form-item label="头像" prop="avatar">
           <el-upload
@@ -283,20 +284,11 @@
         <el-form-item label="电话号码" prop="phone">
           <el-input v-model="form.phone" placeholder="请输入电话号码" />
         </el-form-item>
-        <el-form-item label="最后登录时间" prop="login_date">
-          <el-date-picker v-model="form.login_date" type="date" placeholder="请选择最后登录时间" style="width: 100%" value-format="yyyy-MM-dd" />
-        </el-form-item>
         <el-form-item label="状态" prop="status">
           <el-select v-model="form.status" placeholder="请选择状态" style="width: 100%">
             <el-option label="正常" :value="1" />
             <el-option label="禁用" :value="0" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="创建时间" prop="create_time">
-          <el-date-picker v-model="form.create_time" type="date" placeholder="请选择创建时间" style="width: 100%" value-format="yyyy-MM-dd" />
-        </el-form-item>
-        <el-form-item label="更新时间" prop="update_time">
-          <el-date-picker v-model="form.update_time" type="date" placeholder="请选择更新时间" style="width: 100%" value-format="yyyy-MM-dd" />
         </el-form-item>
         <el-form-item label="备注" prop="remark">
           <el-input v-model="form.remark" placeholder="请输入备注" />
@@ -311,7 +303,7 @@
 </template>
 
 <script>
-import { getUserList, createUser, updateUser, deleteUser, patchUser, getUserDetail } from '@/api/user'
+import { getUserList, createUser, updateUser, deleteUser, getUserDetail } from '@/api/user'
 import { parseTime } from '@/utils'
 import { getDepartmentList } from '@/api/department'
 import { getRoleList } from '@/api/role'
@@ -399,8 +391,8 @@ export default {
       },
       rules: {
         username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-        password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
-        email: [{ required: true, message: '请输入电子邮件', trigger: 'blur' }],
+        password: [{ required: false, message: '请输入密码', trigger: 'blur' }],
+        email: [{ required: false, type: 'email', message: '请输入正确的电子邮件', trigger: 'blur' }],
       },
 
       // 选择框选项
@@ -461,7 +453,12 @@ export default {
           Promise.all(promises)
         }
       } catch (error) {
-        this.$message.error('获取数据失败')
+        if (error.response && error.response.status === 403) {
+          this.tableData = []
+          this.pagination.total = 0
+        } else {
+          this.$message.error('获取数据失败')
+        }
       } finally {
         this.loading = false
       }
@@ -530,26 +527,13 @@ export default {
       this.rules.password = [{ required: true, message: '请输入密码', trigger: 'blur' }]
       this.form = {
         department: undefined,
-
         username: undefined,
-
         password: undefined,
-
         avatar: undefined,
-
         email: undefined,
-
         phone: undefined,
-
-        login_date: undefined,
-
-        create_time: undefined,
-
-        update_time: undefined,
-
         remark: undefined,
-
-        roles: undefined
+        roles: []
       }
       this.dialogVisible = true
       // 确保角色列表已加载
@@ -565,28 +549,26 @@ export default {
       this.rules.password = [{ required: false, trigger: 'blur' }]
       // 深度拷贝，避免直接修改 row 引用
       const formData = JSON.parse(JSON.stringify(row))
-      // 处理角色数据：后端返回的是角色 ID 数组（如 [1]），提取第一个角色的 ID 用于回显
-      let roleId = null
+      // 后端返回的是角色 ID 数组，直接回显为多选数组。
+      let roles = []
       if (Array.isArray(formData.roles) && formData.roles.length > 0) {
-        const firstRole = formData.roles[0]
-        if (firstRole && typeof firstRole === 'object') {
-          roleId = firstRole.id
-        } else if (typeof firstRole === 'number') {
-          roleId = firstRole
-        } else if (typeof firstRole === 'string') {
-          const n = Number(firstRole)
-          if (firstRole.trim() !== '' && !isNaN(n)) {
-            roleId = n
-          } else {
-            const matched = this.roleOptions.find(r => r.name === firstRole)
-            roleId = matched ? matched.id : null
+        roles = formData.roles.map(role => {
+          if (role && typeof role === 'object') return role.id
+          if (typeof role === 'string' && role.trim() !== '') {
+            const n = Number(role)
+            if (!isNaN(n)) return n
+            const matched = this.roleOptions.find(r => r.name === role)
+            return matched ? matched.id : role
           }
-        }
+          return role
+        }).filter(role => role !== null && role !== undefined)
       }
 
       this.form = formData
-      // 使用 $set 显式设置 roles 属性，确保响应式
-      this.$set(this.form, 'roles', roleId)
+      delete this.form.login_date
+      delete this.form.create_time
+      delete this.form.update_time
+      this.$set(this.form, 'roles', roles)
 
       this.dialogVisible = true
     },
@@ -639,63 +621,20 @@ export default {
         await this.$refs.form.validate()
         this.submitLoading = true
         
-        // 确保 roles 是数组格式（即使用户只选了一个，后端可能期望列表）
-        // 如果后端支持直接传单个ID，则不需要这一步，但通常角色是多对多关系，建议包装成数组
-        // 由于我们将表单改成了单选，这里手动包装
         const formToSubmit = { ...this.form }
-        
-        // 关键修复：只有当用户真正修改了角色（即 roles 不为 undefined/null）时，才处理 roles 字段
-        // 如果 roles 还是 undefined（例如编辑时未触碰且未正确回显），则不应该包含在提交中，以免覆盖原有角色
-        // 但我们在 handleEdit 中已经做了回显，所以这里主要是确保如果有值，转换正确
-        if (formToSubmit.roles !== undefined && formToSubmit.roles !== null && formToSubmit.roles !== '') {
-             // 确保是数字类型
-             const roleId = Number(formToSubmit.roles)
-             if (!isNaN(roleId)) {
-                formToSubmit.roles = [roleId]
-             } else {
-                // 如果转换失败，可能是对象或其他非法值，尝试取 id 属性
-                if (typeof formToSubmit.roles === 'object' && formToSubmit.roles.id) {
-                     formToSubmit.roles = [Number(formToSubmit.roles.id)]
-                } else {
-                     // 如果无法解析且不为空，可能是异常数据，置为空数组
-                     formToSubmit.roles = []
-                }
-             }
-        } else {
-            // 如果表单中 roles 为空，说明用户清空了角色或未选择
-            // 如果是编辑模式，且原数据有角色，这代表删除角色
-            // 如果是新增模式，代表不设角色
-            formToSubmit.roles = []
+        if (!Array.isArray(formToSubmit.roles)) {
+          formToSubmit.roles = formToSubmit.roles == null || formToSubmit.roles === '' ? [] : [formToSubmit.roles]
         }
+        formToSubmit.roles = formToSubmit.roles
+          .map(role => (role && typeof role === 'object' ? role.id : role))
+          .filter(role => role !== null && role !== undefined)
 
         const payload = this.transformPayload(formToSubmit)
         if (this.dialogType === 'add') {
-          const res = await createUser(payload)
-          // 尝试补更角色信息（如果后端创建接口未处理角色字段）
-          if (payload.roles && payload.roles.length > 0) {
-            const newUserId = res.id || (res.data && res.data.id) || (res.results && res.results.id)
-            if (newUserId) {
-              try {
-                // 根据DRF规范，可能需要使用 partial update
-                await patchUser(newUserId, { roles: payload.roles })
-              } catch (err) {
-                console.warn('补更角色失败', err)
-              }
-            }
-          }
+          await createUser(payload)
           this.$message.success('新增成功')
         } else {
-          // 更新时也尝试补更角色（针对PUT可能不处理角色字段的情况）
           await updateUser(this.form.id, payload)
-          // 再次检查并更新角色
-          // 只有当 payload 中确实包含 roles 字段时才尝试 patch
-          if (Object.prototype.hasOwnProperty.call(payload, 'roles')) {
-             try {
-                await patchUser(this.form.id, { roles: payload.roles })
-             } catch (err) {
-                console.warn('更新角色失败', err)
-             }
-          }
           this.$message.success('更新成功')
         }
         
@@ -793,25 +732,62 @@ export default {
       this.getList()
     },
 
+    // 拉取分页接口的全部数据，避免部门和角色下拉框只加载默认前 10 条
+    async fetchAllPages(apiFunction, params = {}) {
+      const pageSize = 100
+      let page = 1
+      const allRows = []
+
+      while (true) {
+        const response = await apiFunction({ ...params, page, page_size: pageSize })
+        const data = response && response.data ? response.data : response
+        const rows = (data && data.results) || (response && response.results) || (data && data.list) || (response && response.list)
+
+        if (Array.isArray(rows)) {
+          allRows.push(...rows)
+        } else if (Array.isArray(data)) {
+          allRows.push(...data)
+          break
+        } else {
+          break
+        }
+
+        const count = (data && data.count) || (response && response.count)
+        if (allRows.length >= (count || 0) && count) break
+        if (!Array.isArray(rows) || rows.length === 0 || rows.length < pageSize) break
+        page += 1
+      }
+
+      return allRows
+    },
+
     // 加载部门选项
     async loadDepartmentOptions() {
+      const permissions = (this.$store.getters && this.$store.getters.permissions) || []
+      if (!permissions.includes('*:*:*') && !permissions.includes('system:department:list')) {
+        this.departmentOptions = []
+        return
+      }
       try {
-        const response = await getDepartmentList()
-        const data = response.results || response.data?.results || response.data || response.list || []
+        const data = await this.fetchAllPages(getDepartmentList)
         this.departmentOptions = Array.isArray(data) ? data : []
       } catch (error) {
-        console.error('加载部门选项失败:', error)
-        this.$message.error('加载部门选项失败')
         this.departmentOptions = []
+        if (!(error.response && error.response.status === 403)) {
+          this.$message.error('加载部门选项失败')
+        }
       }
     },
 
     // 加载角色选项
     async loadRoleOptions() {
+      const permissions = (this.$store.getters && this.$store.getters.permissions) || []
+      if (!permissions.includes('*:*:*') && !permissions.includes('system:role:list')) {
+        this.roleOptions = []
+        return
+      }
       try {
-        // 获取所有角色，不分页
-        const response = await getRoleList({ page: 1, size: 1000 }) 
-        const data = response.results || response.data?.results || response.data || response.list || []
+        const data = await this.fetchAllPages(getRoleList)
         this.roleOptions = Array.isArray(data) ? data : []
       } catch (error) {
         console.error('加载角色选项失败:', error)

@@ -4,6 +4,8 @@ import store from '@/store'
 import { getToken } from '@/utils/auth'
 import { getBaseApiUrl } from '@/utils/config'
 
+let last403MessageAt = 0
+
 // create an axios instance
 const service = axios.create({
   baseURL: getBaseApiUrl(), // url = base url + request url
@@ -81,15 +83,21 @@ service.interceptors.response.use(
     return res
   },
   error => {
-    console.log('err' + error) // for debug
     const status = error.response && error.response.status
     const serverMessage = error.response && error.response.data && error.response.data.message
     const isLoginRequest = error.config && error.config.url && error.config.url.includes('/gen_token')
-    Message({
-      message: serverMessage || error.message,
-      type: 'error',
-      duration: 5 * 1000
-    })
+
+    if (status === 403) {
+      // 无权限：友好提示并去重，避免一个页面多个请求弹一堆错误
+      const now = Date.now()
+      if (now - last403MessageAt > 3000) {
+        last403MessageAt = now
+        Message({ message: '无权限访问该资源', type: 'warning', duration: 3000 })
+      }
+    } else {
+      Message({ message: serverMessage || error.message, type: 'error', duration: 5000 })
+    }
+
     if (status === 401 && !isLoginRequest) {
       store.dispatch('user/resetToken').then(() => {
         location.reload()

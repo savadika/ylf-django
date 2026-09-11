@@ -20,6 +20,15 @@ from user.models import SysUser
 
 DEFAULT_MENU_TREE = [
     {
+        'name': '首页',
+        'menu_type': 'C',
+        'path': '/dashboard',
+        'component': 'dashboard/index',
+        'icon': 'dashboard',
+        'order_num': 0,
+        'perms': 'system:dashboard:view',
+    },
+    {
         'name': '系统管理',
         'menu_type': 'M',
         'path': '/system',
@@ -33,6 +42,7 @@ DEFAULT_MENU_TREE = [
                 'component': 'user/index',
                 'icon': 'el-icon-user',
                 'order_num': 1,
+                'perms': 'system:user:list',
                 'buttons': [
                     ('用户列表', 'system:user:list', 1),
                     ('查看用户详情', 'system:user:query', 2),
@@ -48,6 +58,7 @@ DEFAULT_MENU_TREE = [
                 'component': 'role/index',
                 'icon': 'el-icon-s-custom',
                 'order_num': 2,
+                'perms': 'system:role:list',
                 'buttons': [
                     ('角色列表', 'system:role:list', 1),
                     ('查看角色详情', 'system:role:query', 2),
@@ -64,6 +75,7 @@ DEFAULT_MENU_TREE = [
                 'component': 'menu/index',
                 'icon': 'el-icon-menu',
                 'order_num': 3,
+                'perms': 'system:menu:list',
                 'buttons': [
                     ('菜单列表', 'system:menu:list', 1),
                     ('查看菜单详情', 'system:menu:query', 2),
@@ -79,6 +91,7 @@ DEFAULT_MENU_TREE = [
                 'component': 'department/index',
                 'icon': 'el-icon-office-building',
                 'order_num': 4,
+                'perms': 'system:department:list',
                 'buttons': [
                     ('部门列表', 'system:department:list', 1),
                     ('查看部门详情', 'system:department:query', 2),
@@ -94,6 +107,7 @@ DEFAULT_MENU_TREE = [
                 'component': 'log/index',
                 'icon': 'el-icon-document',
                 'order_num': 5,
+                'perms': 'system:log:list',
                 'buttons': [
                     ('日志列表', 'system:log:list', 1),
                     ('查看日志详情', 'system:log:query', 2),

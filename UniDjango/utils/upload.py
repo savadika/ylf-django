@@ -1,16 +1,20 @@
 import os
 import uuid
 import datetime
+from io import BytesIO
+from PIL import Image, UnidentifiedImageError
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
 from utils.permissions import IsAuthenticated
+from utils.response import Ok
+from utils.exceptions import ApiException
 
 
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+ALLOWED_FORMATS = {'JPEG', 'PNG', 'GIF', 'WEBP'}
 MAX_FILE_SIZE = 2 * 1024 * 1024
 MAX_FILE_COUNT = 5
 
@@ -28,18 +32,10 @@ class UploadFileView(APIView):
         # 支持多文件上传
         files = request.FILES.getlist('file')
         if not files:
-            return Response({
-                "code": 400,
-                "message": "未找到文件，请检查参数名是否为 'file'",
-                "data": None
-            }, status=400)
+            raise ApiException("未找到文件，请检查参数名是否为 'file'", status_code=400)
 
         if len(files) > MAX_FILE_COUNT:
-            return Response({
-                "code": 400,
-                "message": f"一次最多上传 {MAX_FILE_COUNT} 个文件",
-                "data": None,
-            }, status=400)
+            raise ApiException(f"一次最多上传 {MAX_FILE_COUNT} 个文件", status_code=400)
 
         uploaded_urls = []
         
@@ -47,18 +43,20 @@ class UploadFileView(APIView):
             ext = os.path.splitext(file_obj.name)[1]
             ext = ext.lower()
             if ext not in ALLOWED_EXTENSIONS:
-                return Response({
-                    "code": 400,
-                    "message": "仅支持 jpg、jpeg、png、gif、webp 图片",
-                    "data": None,
-                }, status=400)
+                raise ApiException("仅支持 jpg、jpeg、png、gif、webp 图片", status_code=400)
 
             if file_obj.size > MAX_FILE_SIZE:
-                return Response({
-                    "code": 400,
-                    "message": "单个文件不能超过 2MB",
-                    "data": None,
-                }, status=400)
+                raise ApiException("单个文件不能超过 2MB", status_code=400)
+
+            content = file_obj.read()
+            try:
+                with Image.open(BytesIO(content)) as image:
+                    image_format = (image.format or '').upper()
+                    if image_format not in ALLOWED_FORMATS:
+                        raise ApiException("仅支持 jpg、jpeg、png、gif、webp 图片", status_code=400)
+                    image.verify()
+            except (UnidentifiedImageError, OSError, ValueError):
+                raise ApiException("文件内容不是有效图片", status_code=400)
 
             # 生成保存路径: uploads/YYYY/MM/DD/uuid.ext
             unique_name = f"{uuid.uuid4().hex}{ext}"
@@ -67,7 +65,7 @@ class UploadFileView(APIView):
             rel_path = f"uploads/{today.year}/{today.month:02d}/{today.day:02d}/{unique_name}"
             
             # 保存文件
-            file_name = default_storage.save(rel_path, ContentFile(file_obj.read()))
+            file_name = default_storage.save(rel_path, ContentFile(content))
 
             # 拼接完整访问 URL (用于返回给前端展示)
             full_url = request.build_absolute_uri(settings.MEDIA_URL + file_name)
@@ -86,8 +84,4 @@ class UploadFileView(APIView):
                 "url": uploaded_urls[0]['path'], # 兼容旧字段，只返回相对路径
             }
 
-        return Response({
-            "code": 200,
-            "message": "上传成功",
-            "data": data
-        })
+        return Ok(data=data)

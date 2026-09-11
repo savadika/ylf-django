@@ -191,6 +191,45 @@ class ExportUtil {
   }
 
   /**
+   * 提取一页导出数据，兼容后端响应信封、原始分页对象和普通数组。
+   */
+  static extractExportPage(response) {
+    if (!response) return { results: [], count: 0, totalPages: 1 }
+
+    if (Array.isArray(response)) {
+      return { results: response, count: response.length, totalPages: 1 }
+    }
+
+    const data = response.data || response
+    if (Array.isArray(data)) {
+      return { results: data, count: data.length, totalPages: 1 }
+    }
+
+    const results =
+      (data && data.results) ||
+      response.results ||
+      (data && data.list) ||
+      response.list ||
+      []
+    const count =
+      (data && data.count) ||
+      response.count ||
+      (Array.isArray(results) ? results.length : 0)
+    const totalPages =
+      (data && data.total_pages) ||
+      response.total_pages ||
+      (data && data.totalPages) ||
+      response.totalPages ||
+      1
+
+    return {
+      results: Array.isArray(results) ? results : [],
+      count,
+      totalPages
+    }
+  }
+
+  /**
    * 根据搜索条件导出数据
    * @param {Function} apiFunction - API调用函数
    * @param {Object} searchParams - 搜索参数
@@ -199,34 +238,35 @@ class ExportUtil {
    */
   static async exportWithSearch(apiFunction, searchParams = {}, exportOptions = {}, format = 'excel') {
     try {
-      // 设置导出参数（获取所有数据）
-      const params = {
-        ...searchParams,
-        page: 1,
-        page_size: 10000, // 设置一个较大的值获取所有数据
-        export: true // 标识这是导出请求
-      }
+      const pageSize = 100
+      let page = 1
+      const allData = []
 
-      // 调用API获取数据
-      const response = await apiFunction(params)
-      
-      // 处理响应数据
-      let data = []
-      if (response && typeof response === 'object') {
-        if (response.results && Array.isArray(response.results)) {
-          data = response.results
-        } else if (Array.isArray(response.data)) {
-          data = response.data
-        } else if (Array.isArray(response)) {
-          data = response
+      while (true) {
+        const params = {
+          ...searchParams,
+          page,
+          page_size: pageSize,
+          export: true
         }
+
+        const response = await apiFunction(params)
+        const { results, count, totalPages } = this.extractExportPage(response)
+        allData.push(...results)
+
+        if (!Array.isArray(results) || results.length === 0) break
+        if (allData.length >= count) break
+        if (page >= totalPages) break
+        if (results.length < pageSize) break
+
+        page += 1
       }
 
       // 根据格式导出
       if (format === 'csv') {
-        return this.exportCSV(data, exportOptions)
+        return this.exportCSV(allData, exportOptions)
       } else {
-        return this.exportExcel(data, exportOptions)
+        return this.exportExcel(allData, exportOptions)
       }
     } catch (error) {
       console.error('导出失败:', error)

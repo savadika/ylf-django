@@ -3,49 +3,13 @@ from django.db.models import Q
 from rest_framework import filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from django.db import models
+
+from utils.response import Ok
 
 
 # 不对外暴露为查询参数的字段（敏感字段或内部字段）
 EXCLUDED_FILTER_FIELDS = {'password'}
-
-
-class BaseComplexFilter(django_filters.FilterSet):
-    """
-    基础复杂查询过滤器类
-    提供通用的查询字段和方法，其他模块可以继承使用
-    """
-    
-    # 通用的时间范围查询字段
-    create_time_start = django_filters.DateFilter(field_name='create_time', lookup_expr='gte', label='创建时间开始')
-    create_time_end = django_filters.DateFilter(field_name='create_time', lookup_expr='lte', label='创建时间结束')
-    update_time_start = django_filters.DateFilter(field_name='update_time', lookup_expr='gte', label='更新时间开始')
-    update_time_end = django_filters.DateFilter(field_name='update_time', lookup_expr='lte', label='更新时间结束')
-    
-    # 通用的状态查询
-    status = django_filters.NumberFilter(field_name='status', label='状态')
-    
-    # 全局搜索字段（子类需要重写filter_search方法）
-    search = django_filters.CharFilter(method='filter_search', label='关键词搜索')
-    
-    def filter_search(self, queryset, name, value):
-        """
-        全局关键词搜索方法
-        子类应该重写此方法来定义具体的搜索逻辑
-        """
-        if value:
-            # 默认实现：如果模型有name字段，则在name字段中搜索
-            if hasattr(queryset.model, 'name'):
-                return queryset.filter(name__icontains=value)
-            # 如果有title字段，则在title字段中搜索
-            elif hasattr(queryset.model, 'title'):
-                return queryset.filter(title__icontains=value)
-        return queryset
-    
-    class Meta:
-        abstract = True
-        fields = ['create_time_start', 'create_time_end', 'update_time_start', 'update_time_end', 'status', 'search']
 
 
 class ComplexQueryMixin:
@@ -58,7 +22,7 @@ class ComplexQueryMixin:
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = []  # 子类需要定义
     ordering_fields = ['id', 'create_time', 'update_time']  # 默认可排序字段
-    ordering = ['id']  # 默认排序
+    ordering = []  # 默认不覆盖 queryset 自身排序，避免破坏业务默认顺序
     
     @action(detail=False, methods=['get'], url_path='advanced-search')
     def advanced_search(self, request):
@@ -84,15 +48,10 @@ class ComplexQueryMixin:
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+            return Ok(data=self.get_paginated_response(serializer.data).data)
         
         serializer = self.get_serializer(queryset, many=True)
-        return Response({
-            'code': 200,
-            'message': '查询成功',
-            'data': serializer.data,
-            'total': queryset.count()
-        })
+        return Ok(data=serializer.data)
     
     @action(detail=False, methods=['get'], url_path='filter-options')
     def filter_options(self, request):
@@ -119,11 +78,7 @@ class ComplexQueryMixin:
         if date_range:
             options['date_range'] = date_range
         
-        return Response({
-            'code': 200,
-            'message': '获取筛选选项成功',
-            'data': options
-        })
+        return Ok(data=options)
     
     def get_ordering_options(self):
         """
@@ -209,68 +164,6 @@ class TextSearchMixin:
         return filter_search
 
 
-class DateRangeFilterMixin:
-    """
-    日期范围过滤混入类
-    提供通用的日期范围过滤功能
-    """
-    
-    @classmethod
-    def create_date_range_filters(cls, date_field):
-        """
-        创建日期范围过滤器
-        
-        Args:
-            date_field: 日期字段名，如 'create_time'
-        
-        Returns:
-            包含开始和结束日期过滤器的字典
-        """
-        return {
-            f'{date_field}_start': django_filters.DateFilter(
-                field_name=date_field, 
-                lookup_expr='gte', 
-                label=f'{date_field}开始'
-            ),
-            f'{date_field}_end': django_filters.DateFilter(
-                field_name=date_field, 
-                lookup_expr='lte', 
-                label=f'{date_field}结束'
-            )
-        }
-
-
-class NumberRangeFilterMixin:
-    """
-    数字范围过滤混入类
-    提供通用的数字范围过滤功能
-    """
-    
-    @classmethod
-    def create_number_range_filters(cls, number_field):
-        """
-        创建数字范围过滤器
-        
-        Args:
-            number_field: 数字字段名，如 'price'
-        
-        Returns:
-            包含最小值和最大值过滤器的字典
-        """
-        return {
-            f'{number_field}_min': django_filters.NumberFilter(
-                field_name=number_field, 
-                lookup_expr='gte', 
-                label=f'{number_field}最小值'
-            ),
-            f'{number_field}_max': django_filters.NumberFilter(
-                field_name=number_field, 
-                lookup_expr='lte', 
-                label=f'{number_field}最大值'
-            )
-        }
-
-
 def create_complex_filter_class(model, search_fields=None, extra_filters=None, auto_detect_fields=True):
     """
     动态创建复杂查询过滤器类
@@ -294,6 +187,10 @@ def create_complex_filter_class(model, search_fields=None, extra_filters=None, a
     for field in model._meta.get_fields():
         if hasattr(field, 'name'):
             model_fields[field.name] = field
+
+    if 'id' in model_fields:
+        attrs['id'] = django_filters.NumberFilter(field_name='id', label='ID')
+        base_fields.append('id')
 
     if 'status' in model_fields:
         attrs['status'] = django_filters.NumberFilter(field_name='status', label='状态')

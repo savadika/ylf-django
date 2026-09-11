@@ -1,17 +1,18 @@
 from rest_framework import viewsets, serializers
 from .models import SysDep
-from utils.pagination import CustomPageNumberPagination
 from utils.filters import create_complex_filter_class
 from utils.permissions import permission_required_for_action
+from utils.viewsets import BaseModelViewSet
+from utils.serializers import BaseModelSerializer
 
 
-class SysDepSerializer(serializers.ModelSerializer):
+class SysDepSerializer(BaseModelSerializer):
     class Meta:
         model = SysDep
         fields = ('id', 'dep_name', 'status', 'create_time', 'update_time', 'remark')
 
 
-class SysDepViewSet(viewsets.ModelViewSet):
+class SysDepViewSet(BaseModelViewSet):
     """
     部门资源：提供列表、详情、创建、更新、局部更新、删除
     路由由 SimpleRouter 生成：/department 与 /department/{id}
@@ -34,7 +35,8 @@ class SysDepViewSet(viewsets.ModelViewSet):
         'update': 'system:department:edit',
         'partial_update': 'system:department:edit',
         'destroy': 'system:department:delete',
+        'advanced_search': 'system:department:list',
+        'filter_options': 'system:department:list',
     })]
-    pagination_class = CustomPageNumberPagination   # 自定义分页类
     filterset_class = create_complex_filter_class(SysDep, search_fields=['dep_name', 'remark'])  # 动态创建的过滤器类，查询
     http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']   # 允许的HTTP方法

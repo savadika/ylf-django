@@ -270,7 +270,9 @@ export default {
       permissionSaving: false,
       permissionTreeData: [],
       checkedPermissions: [],
-      currentRoleId: null
+      currentRoleId: null,
+      hasWildcardPermission: false,
+      wildcardMenuId: null
     }
   },
   computed: {
@@ -297,7 +299,12 @@ export default {
         this.tableData = Array.isArray(rows) ? rows.map(row => this.normalizeRow(row)) : []
         this.pagination.total = response.count || response.data?.count || response.total || response.data?.total || 0
       } catch (error) {
-        Message.error('获取数据失败')
+        if (error.response && error.response.status === 403) {
+          this.tableData = []
+          this.pagination.total = 0
+        } else {
+          Message.error('获取数据失败')
+        }
       } finally {
         this.loading = false
       }
@@ -609,6 +616,26 @@ export default {
       return leafIds
     },
 
+    // 权限分配树中隐藏“全部权限”这类通配权限节点
+    filterPermissionTree(nodes) {
+      return (nodes || [])
+        .filter(node => node.perms !== '*:*:*')
+        .map(node => ({
+          ...node,
+          children: node.children ? this.filterPermissionTree(node.children) : []
+        }))
+    },
+
+    // 查找通配权限节点 ID，用于保存时保留角色原有的通配权限
+    findWildcardMenu(nodes) {
+      for (const node of nodes || []) {
+        if (node.perms === '*:*:*') return node
+        const found = this.findWildcardMenu(node.children)
+        if (found) return found
+      }
+      return null
+    },
+
     // 加载权限选项与角色已分配的权限
     async loadPermissions() {
       try {
@@ -623,13 +650,17 @@ export default {
         // 1. 处理全量菜单树
         // 兼容后端可能返回 { code: 200, data: [...] } 或直接 [...] 的情况
         const allMenusData = allMenusRes.data || allMenusRes
-        this.permissionTreeData = allMenusData
+        this.permissionTreeData = this.filterPermissionTree(allMenusData)
+        const wildcardMenu = this.findWildcardMenu(allMenusData)
+        this.wildcardMenuId = wildcardMenu ? wildcardMenu.id : null
         
         // 2. 处理角色已有权限
         const roleData = roleMenusRes.data || roleMenusRes
         // 后端返回结构为 { menus: [...], permissions: [...] }
         // 树形结构的勾选状态应该完全基于 menus 字段中的 ID
         const ownedMenus = roleData.menus || []
+        const ownedPermissions = roleData.permissions || []
+        this.hasWildcardPermission = ownedPermissions.includes('*:*:*')
 
         // 3. 计算需要打钩的叶子节点
         // 提取所有已拥有菜单的ID (包括目录、菜单、按钮)
@@ -644,6 +675,9 @@ export default {
           })
         }
         extractIds(ownedMenus)
+        if (this.wildcardMenuId != null && ownedMenuIds.some(id => String(id) === String(this.wildcardMenuId))) {
+          this.hasWildcardPermission = true
+        }
 
         // Element UI Tree 的机制：如果勾选了父节点，所有子节点都会被自动勾选
         // 因此，我们只需要设置“真正选中的叶子节点”的ID
@@ -687,7 +721,11 @@ export default {
         this.permissionSaving = true
         const checked = (this.$refs.permissionTree && this.$refs.permissionTree.getCheckedKeys) ? this.$refs.permissionTree.getCheckedKeys() : []
         const halfChecked = (this.$refs.permissionTree && this.$refs.permissionTree.getHalfCheckedKeys) ? this.$refs.permissionTree.getHalfCheckedKeys() : []
-        const permissions = Array.from(new Set([ ...checked, ...halfChecked ]))
+        const permissionSet = new Set([ ...checked, ...halfChecked ])
+        if (this.hasWildcardPermission && this.wildcardMenuId != null) {
+          permissionSet.add(this.wildcardMenuId)
+        }
+        const permissions = Array.from(permissionSet)
 
         await request({
           url: `/role/${this.currentRoleId}/permissions`,

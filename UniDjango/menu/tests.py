@@ -1,7 +1,8 @@
 """menu 模块测试：菜单树构建、删除菜单时清理角色菜单关联。"""
 from django.test import SimpleTestCase, TestCase
 
-from menu.models import SysMenu, SysMenuSerializer, SysRoleMenu
+from menu.models import SysMenu, SysRoleMenu
+from menu.serializers import SysMenuSerializer
 from menu.views import SysMenuViewSet
 from role.models import SysRole
 from utils.menu_tree import build_menu_tree

@@ -49,6 +49,9 @@ class HasPermission(BasePermission):
             return False
 
         required = self.get_required_permissions(request, view)
+        # get_required_permissions 返回 None 表示该 action 未配置权限，默认拒绝（fail-closed）。
+        if required is None:
+            return False
         if not required:
             return True
 
@@ -80,7 +83,7 @@ class ActionPermission(HasPermission):
         action = getattr(view, 'action', None)
         perms = self.action_permissions.get(action)
         if not perms:
-            return set()
+            return None
         if isinstance(perms, str):
             return {perms}
         return set(perms)

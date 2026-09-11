@@ -247,7 +247,7 @@
 </template>
 
 <script>
-import { getLogList, createLog, updateLog, deleteLog } from '@/api/log'
+import { getLogList } from '@/api/log'
 import { getUserList } from '@/api/user'
 import { parseTime } from '@/utils'
 import exportMixin from '@/utils/exportMixin'
@@ -370,7 +370,12 @@ export default {
         this.tableData = Array.isArray(rows) ? rows.map(row => this.normalizeRow(row)) : []
         this.pagination.total = response.count || response.data?.count || response.total || response.data?.total || 0
       } catch (error) {
-        this.$message.error('获取数据失败')
+        if (error.response && error.response.status === 403) {
+          this.tableData = []
+          this.pagination.total = 0
+        } else {
+          this.$message.error('获取数据失败')
+        }
       } finally {
         this.loading = false
       }
@@ -457,96 +462,11 @@ export default {
       this.$message.error('导出失败')
     },
 
-    // 新增
-    handleCreate() {
-      this.dialogType = 'add'
-      this.form = {
-        username: undefined,
-        user: undefined,
-        ip: undefined,
-        method: undefined,
-        path: undefined,
-        params: undefined,
-        cost_time: undefined,
-        create_time: undefined,
-        log_type: 'INFO',
-        error_msg: undefined,
-        traceback: undefined,
-      }
-      this.dialogVisible = true
-    },
-
     // 编辑
     handleEdit(row) {
       this.dialogType = 'edit'
       this.form = { ...row }
       this.dialogVisible = true
-    },
-
-    // 删除
-    async handleDelete(row) {
-      try {
-        await this.$confirm('确定要删除这条记录吗？', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        })
-        await deleteLog(row.id)
-        this.$message.success('删除成功')
-        this.getList()
-      } catch (error) {
-        if (error !== 'cancel') {
-          this.$message.error('删除失败')
-        }
-      }
-    },
-
-    // 批量删除
-    async handleBatchDelete() {
-      if (this.multipleSelection.length === 0) {
-        this.$message.warning('请选择要删除的记录')
-        return
-      }
-      try {
-        await this.$confirm('确定要删除选中的记录吗？', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        })
-        const ids = this.multipleSelection.map(item => item.id)
-        // 这里需要根据实际API调整批量删除逻辑
-        await Promise.all(ids.map(id => deleteLog(id)))
-        this.$message.success('删除成功')
-        this.getList()
-      } catch (error) {
-        if (error !== 'cancel') {
-          this.$message.error('删除失败')
-        }
-      }
-    },
-
-    // 提交表单
-    async handleSubmit() {
-      try {
-        await this.$refs.form.validate()
-        this.submitLoading = true
-        
-        const payload = this.transformPayload(this.form)
-        if (this.dialogType === 'add') {
-          await createLog(payload)
-          this.$message.success('新增成功')
-        } else {
-          await updateLog(this.form.id, payload)
-          this.$message.success('更新成功')
-        }
-        
-        this.dialogVisible = false
-        this.getList()
-      } catch (error) {
-        this.$message.error(this.dialogType === 'add' ? '新增失败' : '更新失败')
-      } finally {
-        this.submitLoading = false
-      }
     },
 
     // 对话框关闭
@@ -645,9 +565,10 @@ export default {
         const data = response.results || response.data?.results || response.data || response.list || []
         this.sysuserOptions = Array.isArray(data) ? data : []
       } catch (error) {
-        console.error('加载操作用户选项失败:', error)
-        this.$message.error('加载操作用户选项失败')
         this.sysuserOptions = []
+        if (!(error.response && error.response.status === 403)) {
+          this.$message.error('加载操作用户选项失败')
+        }
       }
     },
 

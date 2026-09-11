@@ -1,10 +1,11 @@
 from rest_framework import viewsets, serializers
 from .models import SysLog
-from utils.pagination import CustomPageNumberPagination
 from utils.filters import create_complex_filter_class
 from utils.permissions import permission_required_for_action
+from utils.viewsets import BaseReadOnlyModelViewSet
+from utils.serializers import BaseModelSerializer
 
-class SysLogSerializer(serializers.ModelSerializer):
+class SysLogSerializer(BaseModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
 
     class Meta:
@@ -14,7 +15,7 @@ class SysLogSerializer(serializers.ModelSerializer):
             'cost_time', 'create_time', 'log_type', 'error_msg', 'traceback',
         )
 
-class SysLogViewSet(viewsets.ReadOnlyModelViewSet):
+class SysLogViewSet(BaseReadOnlyModelViewSet):
     """
     系统日志资源：提供列表、详情
     支持分页功能和高级搜索功能
@@ -30,7 +31,8 @@ class SysLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permission_required_for_action({
         'list': 'system:log:list',
         'retrieve': 'system:log:query',
+        'advanced_search': 'system:log:list',
+        'filter_options': 'system:log:list',
     })]
-    pagination_class = CustomPageNumberPagination
     filterset_class = create_complex_filter_class(SysLog, search_fields=['path', 'error_msg', 'params'])
     ordering_fields = ['create_time', 'cost_time', 'status']

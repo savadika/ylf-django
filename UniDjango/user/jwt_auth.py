@@ -4,16 +4,20 @@
 令牌生成、解析和注销黑名单。
 """
 import datetime
+import logging
 import uuid
 
 import jwt
 from django.conf import settings
 from django.core.cache import cache
+from utils.exceptions import CacheUnavailable
 
 
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DELTA = datetime.timedelta(days=7)
 REVOKE_CACHE_PREFIX = 'jwt_revoke:'
+
+logger = logging.getLogger(__name__)
 
 
 def _now_timestamp():
@@ -58,8 +62,11 @@ def is_token_revoked(payload):
         return False
     try:
         return bool(cache.get(REVOKE_CACHE_PREFIX + jti))
-    except Exception:
-        return False
+    except Exception as exc:
+        # Redis 不可用时无法确认 token 是否已注销，必须拒绝认证，避免已注销
+        # token 被放行。调用方应转换为 503 并告警。
+        logger.error("查询 token 注销状态失败", exc_info=True)
+        raise CacheUnavailable("无法查询 token 注销状态") from exc
 
 
 def revoke_token(token):
@@ -83,5 +90,6 @@ def revoke_token(token):
 
     try:
         cache.set(REVOKE_CACHE_PREFIX + jti, 1, int(timeout) or 1)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("写入 token 注销黑名单失败", exc_info=True)
+        raise CacheUnavailable("无法注销 token") from exc

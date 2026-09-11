@@ -4,14 +4,22 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ${REDIS_CONTAINER_NAME}
-    restart: always
+    restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     volumes:
       - ./redis_data:/data:Z
     networks:
       - ylf-network
     ports:
-      - "${REDIS_PORT}:${REDIS_INTERNAL_PORT}"
+      - "127.0.0.1:${REDIS_PORT}:${REDIS_INTERNAL_PORT}"
 
   # 2. 数据库服务
   db:
@@ -20,6 +28,7 @@ services:
       dockerfile: docker/mysql/Dockerfile
     image: ${MYSQL_CONTAINER_NAME}:latest # <--- 显式指定镜像名
     container_name: ${MYSQL_CONTAINER_NAME}
+    restart: unless-stopped
     volumes:
       - ./db_data:/var/lib/mysql:Z
     environment:
@@ -28,7 +37,7 @@ services:
     networks:
       - ylf-network
     ports:
-      - "${MYSQL_PORT}:${MYSQL_INTERNAL_PORT}"
+      - "127.0.0.1:${MYSQL_PORT}:${MYSQL_INTERNAL_PORT}"
 
   # 2. 后端服务 (Django)
   backend:
@@ -36,7 +45,7 @@ services:
       context: ./UniDjango
     image: ${BACKEND_CONTAINER_NAME}:latest # <--- 显式指定镜像名
     container_name: ${BACKEND_CONTAINER_NAME}
-    restart: always
+    restart: unless-stopped
     environment:
       # 生产环境关闭调试模式
       DEBUG: "False"
@@ -71,8 +80,10 @@ services:
     volumes:
       - ./UniDjango/media:/app/media:z
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_started
+      redis:
+        condition: service_healthy
     networks:
       - ylf-network
     ports:
@@ -88,7 +99,7 @@ services:
         VUE_APP_BASE_API: /prod-api
     image: ${FRONTEND_CONTAINER_NAME}:latest # <--- 显式指定镜像名
     container_name: ${FRONTEND_CONTAINER_NAME}
-    restart: always
+    restart: unless-stopped
     ports:
       # - "80:80" # 开发模式下注释掉，避免端口冲突
       - "${FRONTEND_PORT}:${FRONTEND_INTERNAL_PORT}" # 映射到其他端口

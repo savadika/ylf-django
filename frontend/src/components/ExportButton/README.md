@@ -210,7 +210,7 @@ exportOptions: {
 
 1. 确保已安装 `xlsx` 依赖：`npm install xlsx`
 2. API函数应该支持分页参数（page, page_size）
-3. 导出时会自动设置 `page_size: 10000` 来获取所有数据
+3. 导出时会按 `page_size: 100` 自动翻页获取所有数据，避免超过后端分页上限
 4. 文件名会自动添加时间戳避免重复
 5. CSV文件会自动添加BOM以支持中文显示
 

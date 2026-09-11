@@ -2,13 +2,13 @@ from django.db import models
 from django.contrib.auth.hashers import make_password
 from department.models import SysDep
 from utils.menu_tree import build_menu_tree
+from utils.models import BaseModel, TimestampMixin, RemarkMixin, StatusMixin
 
 # Create your models here.
-class SysUser(models.Model):
+class SysUser(BaseModel, TimestampMixin, RemarkMixin, StatusMixin):
     """
     用户模型
     """
-    id = models.AutoField(primary_key=True, verbose_name='用户ID')
     department = models.ForeignKey(SysDep, on_delete=models.SET_NULL, null=True, verbose_name='部门')  #部门外键
     username = models.CharField(max_length=150, unique=True, verbose_name='用户名')
     password = models.CharField(max_length=128, verbose_name='密码')
@@ -16,10 +16,6 @@ class SysUser(models.Model):
     email = models.EmailField(max_length=254, unique=True, null=True, blank=True, verbose_name='电子邮件')
     phone = models.CharField(max_length=15, null=True, verbose_name='电话号码')
     login_date = models.DateTimeField(null=True, verbose_name='最后登录时间')
-    status = models.IntegerField(null=True, default=1, choices=[(1, '正常'), (0, '禁用')], verbose_name='状态')
-    create_time = models.DateTimeField(null=True, auto_now_add=True, verbose_name='创建时间')
-    update_time = models.DateTimeField(null=True, auto_now=True, verbose_name='更新时间')
-    remark = models.CharField(max_length=500, null=True, verbose_name='备注')
 
     class Meta:
         db_table = 'sys_user'

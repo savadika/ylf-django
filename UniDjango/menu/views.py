@@ -1,14 +1,15 @@
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from django.db import transaction
-from .models import SysMenu, SysMenuSerializer, SysRoleMenu
-from utils.pagination import CustomPageNumberPagination
+from .models import SysMenu, SysRoleMenu
+from .serializers import SysMenuSerializer
 from utils.filters import create_complex_filter_class
 from utils.permissions import permission_required_for_action
+from utils.viewsets import BaseModelViewSet
 from utils.menu_tree import build_menu_tree
+from utils.response import Ok
 
-class SysMenuViewSet(viewsets.ModelViewSet):
+class SysMenuViewSet(BaseModelViewSet):
     """
     菜单资源：提供列表、详情、创建、更新、局部更新、删除
     """
@@ -22,8 +23,9 @@ class SysMenuViewSet(viewsets.ModelViewSet):
         'partial_update': 'system:menu:edit',
         'destroy': 'system:menu:delete',
         'get_all_menus': 'system:menu:list',
+        'advanced_search': 'system:menu:list',
+        'filter_options': 'system:menu:list',
     })]
-    pagination_class = CustomPageNumberPagination
     filterset_class = create_complex_filter_class(SysMenu, search_fields=['name', 'path', 'component', 'perms', 'remark'])
     http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']
 
@@ -52,7 +54,4 @@ class SysMenuViewSet(viewsets.ModelViewSet):
         menus = SysMenu.objects.all().order_by('order_num', 'id')
         roots, _ = build_menu_tree(menus)
 
-        return Response({
-            'code': 200,
-            'data': roots
-        })
+        return Ok(data=roots)
