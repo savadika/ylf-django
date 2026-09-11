@@ -9,6 +9,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 
 DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
+if [[ -L "$DAEMON_JSON" ]]; then
+    DAEMON_JSON="$(readlink -f "$DAEMON_JSON")"
+fi
 
 # 候选镜像源：会把当前 daemon.json 中的源和这里列出的源合并后检测。
 CANDIDATE_MIRRORS=(
@@ -26,6 +29,9 @@ NO_RESTART=0
 WITH_COMPOSE=0
 SKIP_PROBE=0
 ORIGINAL_ARGS=("$@")
+BACKUP_FILE=""
+HAD_ORIGINAL=0
+CURL_MISSING_WARNED=0
 
 log() {
     printf '\033[1;34m==>\033[0m %s\n' "$*"
@@ -104,8 +110,26 @@ done
 
 normalize_url() {
     local url="$1"
+    if [[ "$url" == *[[:space:]]* ]]; then
+        warn "无效的镜像 URL：$url（不能包含空白字符）"
+        return 1
+    fi
+    if [[ "$url" != http://* && "$url" != https://* ]]; then
+        warn "无效的镜像 URL：$url（需要以 http:// 或 https:// 开头）"
+        return 1
+    fi
+
+    local host
+    host="${url#*://}"
+    host="${host%%/*}"
+    if [[ -z "$host" ]]; then
+        warn "无效的镜像 URL：$url（缺少主机名）"
+        return 1
+    fi
+
     url="${url%/}"
     printf '%s\n' "$url"
+    return 0
 }
 
 contains() {
@@ -168,6 +192,7 @@ write_daemon_json() {
         python3 - "$DAEMON_JSON" "${urls[@]}" <<'PY'
 import json
 import os
+import stat
 import sys
 import tempfile
 
@@ -175,7 +200,18 @@ path = sys.argv[1]
 urls = sys.argv[2:]
 
 data = {}
+mode = 0o644
+uid = -1
+gid = -1
 if os.path.exists(path):
+    try:
+        st = os.stat(path)
+        mode = stat.S_IMODE(st.st_mode)
+        uid = st.st_uid
+        gid = st.st_gid
+    except Exception:
+        pass
+
     try:
         with open(path, encoding="utf-8") as f:
             loaded = json.load(f)
@@ -191,7 +227,12 @@ try:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    os.chmod(tmp, 0o644)
+    os.chmod(tmp, mode)
+    if uid != -1 and gid != -1:
+        try:
+            os.chown(tmp, uid, gid)
+        except Exception:
+            pass
     os.replace(tmp, path)
 except Exception:
     try:
@@ -205,12 +246,18 @@ PY
         tmp_file="$(mktemp "${DAEMON_JSON}.tmp.XXXXXX")"
         local json_array
         json_array="$(printf '%s\n' "${urls[@]}" | jq -R . | jq -s .)"
+        local original_mode=""
         if [[ -f "$DAEMON_JSON" ]]; then
+            original_mode="$(stat -c '%a' "$DAEMON_JSON" 2>/dev/null || true)"
             jq --argjson mirrors "$json_array" '.registry-mirrors = $mirrors' "$DAEMON_JSON" > "$tmp_file"
         else
             jq -n --argjson mirrors "$json_array" '{ "registry-mirrors": $mirrors }' > "$tmp_file"
         fi
-        chmod 644 "$tmp_file"
+        if [[ -n "$original_mode" ]]; then
+            chmod "$original_mode" "$tmp_file"
+        else
+            chmod 644 "$tmp_file"
+        fi
         mv "$tmp_file" "$DAEMON_JSON"
     else
         die "需要 python3 或 jq 才能安全写入 daemon.json"
@@ -221,13 +268,55 @@ PY
     fi
 }
 
+validate_daemon_json() {
+    if ! command -v dockerd >/dev/null 2>&1; then
+        warn "未找到 dockerd，跳过 Docker 配置校验"
+        return 0
+    fi
+
+    log "校验 ${DAEMON_JSON}"
+    local err
+    if err="$(dockerd --validate --config-file "$DAEMON_JSON" 2>&1)"; then
+        return 0
+    fi
+
+    warn "Docker 配置校验失败："
+    printf '%s\n' "$err" >&2
+    return 1
+}
+
+restore_backup() {
+    if [[ "$HAD_ORIGINAL" -eq 1 ]]; then
+        if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
+            cp -a "$BACKUP_FILE" "$DAEMON_JSON"
+            log "已从备份恢复 $DAEMON_JSON"
+            return 0
+        fi
+
+        warn "备份文件不可用，无法自动恢复 $DAEMON_JSON"
+        return 1
+    fi
+
+    if [[ -f "$DAEMON_JSON" ]]; then
+        if ! rm -f -- "$DAEMON_JSON"; then
+            warn "无法移除本次新建的 $DAEMON_JSON"
+            return 1
+        fi
+        log "已移除本次新建的 $DAEMON_JSON"
+    fi
+    return 0
+}
+
 probe_mirror() {
     local url="$1"
     if [[ "$SKIP_PROBE" -eq 1 ]]; then
         return 0
     fi
     if ! command -v curl >/dev/null 2>&1; then
-        warn "未找到 curl，跳过连通性检测"
+        if [[ "$CURL_MISSING_WARNED" -eq 0 ]]; then
+            warn "未找到 curl，跳过连通性检测"
+            CURL_MISSING_WARNED=1
+        fi
         return 0
     fi
 
@@ -269,6 +358,9 @@ require_root() {
     fi
 
     if command -v sudo >/dev/null 2>&1; then
+        if [[ -n "${DOCKER_DAEMON_JSON:-}" ]]; then
+            exec sudo env "DOCKER_DAEMON_JSON=$DOCKER_DAEMON_JSON" bash "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
+        fi
         exec sudo bash "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
     fi
 
@@ -291,14 +383,21 @@ choose_target_mirrors() {
     case "${MODE:-auto}" in
         set)
             [[ ${#SET_MIRRORS[@]} -gt 0 ]] || die "set 命令需要至少一个镜像 URL"
+            local normalized
             for m in "${SET_MIRRORS[@]}"; do
-                result+=("$(normalize_url "$m")")
+                normalized="$(normalize_url "$m")" || die "无法设置镜像 URL：$m"
+                append_unique result "$normalized"
             done
             ;;
         add)
             [[ ${#SET_MIRRORS[@]} -gt 0 ]] || die "add 命令需要至少一个镜像 URL"
-            for m in "${current[@]}" "${SET_MIRRORS[@]}"; do
-                append_unique result "$(normalize_url "$m")"
+            local normalized
+            for m in "${current[@]}"; do
+                append_unique result "${m%/}"
+            done
+            for m in "${SET_MIRRORS[@]}"; do
+                normalized="$(normalize_url "$m")" || die "无法添加镜像 URL：$m"
+                append_unique result "$normalized"
             done
             ;;
         remove)
@@ -308,12 +407,12 @@ choose_target_mirrors() {
                 keep=1
                 local r
                 for r in "${SET_MIRRORS[@]}"; do
-                    if [[ "$m" == "$(normalize_url "$r")" ]]; then
+                    if [[ "${m%/}" == "${r%/}" ]]; then
                         keep=0
                         break
                     fi
                 done
-                [[ "$keep" -eq 1 ]] && result+=("$m")
+                [[ "$keep" -eq 1 ]] && result+=("${m%/}")
             done
             [[ ${#result[@]} -gt 0 ]] || die "移除后没有可用镜像源"
             ;;
@@ -351,9 +450,15 @@ choose_target_mirrors() {
 restart_docker() {
     log "重启 Docker 服务"
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl restart docker
+        if ! systemctl restart docker; then
+            warn "systemctl restart docker 失败"
+            return 1
+        fi
     elif command -v service >/dev/null 2>&1; then
-        service docker restart
+        if ! service docker restart; then
+            warn "service docker restart 失败"
+            return 1
+        fi
     else
         die "未找到 systemctl 或 service，无法重启 Docker"
     fi
@@ -368,6 +473,7 @@ restart_docker() {
     done
 
     warn "Docker 在 30 秒内未恢复运行，请手动检查：systemctl status docker"
+    return 1
 }
 
 restart_compose() {
@@ -381,12 +487,20 @@ restart_compose() {
     log "重启 docker compose 服务"
     cd "$ROOT_DIR"
     if docker compose version >/dev/null 2>&1; then
-        docker compose up -d
+        if ! docker compose up -d; then
+            warn "docker compose up -d 失败"
+            return 1
+        fi
     elif docker-compose version >/dev/null 2>&1; then
-        docker-compose up -d
+        if ! docker-compose up -d; then
+            warn "docker-compose up -d 失败"
+            return 1
+        fi
     else
         warn "未找到 docker compose，跳过项目服务重启"
     fi
+
+    return 0
 }
 
 if [[ "$MODE" == "list" ]]; then
@@ -401,15 +515,22 @@ declare -a target=()
 choose_target_mirrors target
 
 if [[ -f "$DAEMON_JSON" ]]; then
+    HAD_ORIGINAL=1
     BACKUP_FILE="$(mktemp "${DAEMON_JSON}.bak.XXXXXX")"
     cp -a "$DAEMON_JSON" "$BACKUP_FILE"
     log "已备份原配置到 $BACKUP_FILE"
 else
+    HAD_ORIGINAL=0
     BACKUP_FILE=""
 fi
 
 log "写入 ${DAEMON_JSON}"
 write_daemon_json "${target[@]}"
+
+if ! validate_daemon_json; then
+    restore_backup || true
+    die "daemon.json 校验未通过，已尝试恢复原配置"
+fi
 
 echo
 echo "已配置 registry-mirrors："
@@ -420,8 +541,12 @@ done
 if [[ "$NO_RESTART" -eq 1 ]]; then
     warn "已按 --no-restart 跳过 Docker 重启"
 else
-    restart_docker
-    restart_compose
+    if restart_docker; then
+        restart_compose || warn "docker compose 服务重启失败"
+    else
+        restore_backup || true
+        die "Docker 重启失败，已尝试恢复原配置"
+    fi
 fi
 
 echo
